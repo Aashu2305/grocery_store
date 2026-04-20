@@ -5,181 +5,194 @@ import { supabase } from '../supabaseClient';
 const CustomerHistory = ({ customer, history, onClose, onRefresh }) => {
   const [activeTab, setActiveTab] = useState('ALL'); 
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
+  const [showFilters, setShowFilters] = useState(false);
   const [payAmount, setPayAmount] = useState('');
+  const [payNote, setPayNote] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  // --- 🛑 SCROLL LOCK: Stops the background page from moving ---
   useEffect(() => {
     document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = 'auto';
-    };
+    return () => { document.body.style.overflow = 'auto'; };
   }, []);
 
-  // --- 🔍 FILTER LOGIC ---
   const filteredHistory = history.filter(h => {
     const matchesTab = activeTab === 'ALL' || h.type === activeTab;
     const hDate = h.created_at.split('T')[0];
-    const matchesDate = (!dateRange.from || hDate >= dateRange.from) && 
-                        (!dateRange.to || hDate <= dateRange.to);
+    const matchesDate = (!dateRange.from || hDate >= dateRange.from) && (!dateRange.to || hDate <= dateRange.to);
     return matchesTab && matchesDate;
   });
 
-  // --- 📅 GROUPING LOGIC ---
   const groups = filteredHistory.reduce((acc, h) => {
-    const date = new Date(h.created_at).toLocaleDateString('en-IN', { 
-      day: 'numeric', month: 'short', year: 'numeric' 
-    });
+    const date = new Date(h.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
     if (!acc[date]) acc[date] = [];
     acc[date].push(h);
     return acc;
   }, {});
 
-  // --- 💰 SETTLE PAYMENT LOGIC ---
   const handlePayment = async () => {
-    if (!payAmount || isNaN(payAmount) || Number(payAmount) <= 0) {
-      return alert("Enter a valid amount, bro!");
-    }
-    const amt = Number(payAmount);
+    if (!payAmount || isNaN(payAmount) || Number(payAmount) <= 0 || loading) return;
+    setLoading(true);
     try {
-      const { error: balanceError } = await supabase
-        .from('customers')
-        .update({ balance: customer.balance - amt })
-        .eq('id', customer.id);
-      
-      if (balanceError) throw balanceError;
-
-      const { error: transError } = await supabase
-        .from('transactions')
-        .insert([{
-          customer_id: customer.id,
-          type: 'CREDIT',
-          amount: amt,
-          description: "Manual Settlement Payment"
-        }]);
-
-      if (transError) throw transError;
-
-      setPayAmount('');
-      onRefresh(customer.id); 
-      alert(`₹${amt} payment saved!`);
+      const amt = Number(payAmount);
+      await supabase.from('customers').update({ balance: customer.balance - amt }).eq('id', customer.id);
+      await supabase.from('transactions').insert([{ 
+        customer_id: customer.id, 
+        type: 'CREDIT', 
+        amount: amt, 
+        description: payNote || "Settlement" 
+      }]);
+      setPayAmount(''); setPayNote('');
+      onRefresh(customer.id);
     } catch (err) { alert(err.message); }
+    setLoading(false);
   };
 
   return (
     <div style={modalOverlay}>
       <div style={modalContent}>
         
-        {/* --- HEADER --- */}
-        <div style={modalHeader}>
+        {/* --- HEADER (Fixed visibility) --- */}
+        <div style={headerArea}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={avatar}>{customer.name[0].toUpperCase()}</div>
-            <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#fff' }}>{customer.name}</h3>
-          </div>
-          <X onClick={onClose} style={{ cursor: 'pointer', color: '#666' }} />
-        </div>
-
-        {/* --- 💸 SETTLEMENT BAR (Aligned) --- */}
-        <div style={paymentSection}>
-          <div style={payInputWrapper}>
-             <span style={rupeeIcon}>₹</span>
-             <input 
-              type="number" 
-              inputMode="decimal"
-              placeholder="0.00" 
-              value={payAmount} onChange={e => setPayAmount(e.target.value)}
-              style={payInput}
-            />
-          </div>
-          <button onClick={handlePayment} style={payBtn}>
-            <CreditCard size={18} /> Pay
-          </button>
-        </div>
-
-        {/* --- 🗓️ DATE RANGE FILTERS (Clean) --- */}
-        <div style={filterRow}>
-          <div style={dateBox}>
-            <span style={dateLabel}>From Date</span>
-            <div style={dateFlex}>
-              <Calendar size={14} color="#4caf50" />
-              <input type="date" style={dateInput} onChange={e => setDateRange({...dateRange, from: e.target.value})} />
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1rem', color: '#fff', textTransform: 'capitalize' }}>{customer.name}</h3>
+              <p style={{ margin: 0, color: '#ff4d4d', fontWeight: 'bold', fontSize: '0.9rem' }}>₹{customer.balance} Pending</p>
             </div>
           </div>
-          <div style={dateBox}>
-            <span style={dateLabel}>To Date</span>
-            <div style={dateFlex}>
-              <Calendar size={14} color="#4caf50" />
-              <input type="date" style={dateInput} onChange={e => setDateRange({...dateRange, to: e.target.value})} />
-            </div>
-          </div>
+          <button onClick={onClose} style={closeBtn}><X size={20} /></button>
         </div>
 
-        {/* --- 📑 TABS --- */}
-        <div style={tabContainer}>
-          {['ALL', 'DEBIT', 'CREDIT'].map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)} 
-              style={{ ...tabItem, color: activeTab === tab ? '#fff' : '#666', background: activeTab === tab ? '#333' : 'transparent' }}>
-              {tab === 'ALL' ? 'History' : tab === 'DEBIT' ? 'Udhaar' : 'Paid'}
+        {/* Payment Input Card */}
+        <div style={payCard}>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={inputWrap}>
+              <span style={{ color: '#4caf50' }}>₹</span>
+              <input placeholder="0" type="number" value={payAmount} onChange={e => setPayAmount(e.target.value)} style={pInput}/>
+            </div>
+            <button onClick={handlePayment} disabled={loading} style={pBtn}>
+              {loading ? '...' : 'Pay'}
             </button>
-          ))}
+          </div>
+          <input 
+            placeholder="Add note (Cash, PhonePe...)" 
+            value={payNote} onChange={e => setPayNote(e.target.value)} 
+            style={noteIn}
+          />
         </div>
 
-        {/* --- 📜 SCROLLABLE TIMELINE --- */}
-        <div style={ledgerScroll}>
-          {Object.entries(groups).length === 0 ? (
-            <div style={{ textAlign: 'center', marginTop: '40px', color: '#444' }}>No transactions found</div>
-          ) : (
-            Object.entries(groups).map(([date, logs]) => (
-              <div key={date} style={{ marginBottom: '25px' }}>
-                <div style={dateHeader}>{date}</div>
-                <div style={timelineContainer}>
-                  {logs.map(log => (
-                    <div key={log.id} style={logCard}>
-                      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                        {log.type === 'DEBIT' ? <ArrowUpCircle color="#ff4d4d" size={20}/> : <ArrowDownCircle color="#4caf50" size={20}/>}
-                        <div>
-                          <div style={{ fontSize: '0.9rem', color: '#eee', fontWeight: '500' }}>{log.description}</div>
-                          <div style={{ fontSize: '0.7rem', color: '#555' }}>{new Date(log.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
-                        </div>
-                      </div>
-                      <div style={{ fontWeight: 'bold', color: log.type === 'DEBIT' ? '#ff4d4d' : '#4caf50' }}>
-                        {log.type === 'DEBIT' ? '+' : '-'} ₹{log.amount}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+        {/* Tab & Filter Controls */}
+        <div style={controlsRow}>
+          <div style={tabGroup}>
+            {['ALL', 'DEBIT', 'CREDIT'].map(tab => (
+              <button key={tab} onClick={() => setActiveTab(tab)} 
+                style={{ ...tBtn, color: activeTab === tab ? '#4caf50' : '#555' }}>
+                {tab === 'ALL' ? 'History' : tab === 'DEBIT' ? 'Udhaar' : 'Paid'}
+              </button>
+            ))}
+          </div>
+          <Calendar size={18} onClick={() => setShowFilters(!showFilters)} style={{ cursor: 'pointer', color: showFilters ? '#4caf50' : '#444' }} />
+        </div>
+
+        {showFilters && (
+          <div style={dateBox}>
+            <input type="date" style={dIn} onChange={e => setDateRange({...dateRange, from: e.target.value})} />
+            <input type="date" style={dIn} onChange={e => setDateRange({...dateRange, to: e.target.value})} />
+          </div>
+        )}
+
+        {/* --- SCROLLABLE LIST (Fixed scrollbar overlap) --- */}
+        <div style={scrollArea}>
+          {Object.entries(groups).map(([date, logs]) => (
+            <div key={date} style={{ marginBottom: '25px' }}>
+              <div style={dateHighlightContainer}>
+                <span style={datePill}>{date}</span>
+                <div style={dateLine} />
               </div>
-            ))
-          )}
+
+              {logs.map(log => (
+                <div key={log.id} style={logRow}>
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flex: 1 }}>
+                    {log.type === 'DEBIT' ? <ArrowUpCircle color="#ff4d4d" size={18}/> : <ArrowDownCircle color="#4caf50" size={18}/>}
+                    <div style={{ flex: 1 }}>
+                      <div style={logDesc}>{log.description}</div>
+                      <div style={logTime}>{new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontWeight: 'bold', color: log.type === 'DEBIT' ? '#ff4d4d' : '#4caf50', marginLeft: '10px' }}>
+                    {log.type === 'DEBIT' ? '+' : '-'} ₹{log.amount}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+          {/* Bottom space to ensure nothing is cut off */}
+          <div style={{ height: '100px' }} />
         </div>
       </div>
     </div>
   );
 };
 
-// --- STYLES (Professional & Mobile Optimized) ---
-const modalOverlay = { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.95)', display: 'flex', justifyContent: 'center', alignItems: 'flex-end', zIndex: 3000 };
-const modalContent = { width: '100%', maxWidth: '500px', background: '#0a0a0a', padding: '24px', borderRadius: '30px 30px 0 0', height: '90vh', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' };
-const modalHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' };
-const avatar = { width: '40px', height: '40px', borderRadius: '50%', background: '#4caf50', color: '#000', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold' };
+// --- STYLES ---
+const modalOverlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', zIndex: 5000, display: 'flex', justifyContent: 'center', alignItems: 'flex-end' };
 
-const paymentSection = { display: 'flex', gap: '12px', marginBottom: '20px', alignItems: 'center', background: '#111', padding: '12px', borderRadius: '16px', border: '1px solid #222' };
-const payInputWrapper = { flex: 1, position: 'relative', display: 'flex', alignItems: 'center' };
-const payInput = { background: 'transparent', border: 'none', color: '#fff', padding: '8px 8px 8px 24px', fontSize: '1.1rem', width: '100%', outline: 'none' };
-const rupeeIcon = { position: 'absolute', left: '4px', color: '#4caf50', fontSize: '1.1rem', fontWeight: 'bold' };
-const payBtn = { background: '#4caf50', border: 'none', color: '#000', padding: '10px 20px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' };
+const modalContent = { 
+  width: '100%', 
+  maxWidth: '500px', 
+  background: '#050505', 
+  height: '92vh', 
+  borderRadius: '30px 30px 0 0', 
+  display: 'flex', 
+  flexDirection: 'column', 
+  padding: '0 20px 20px 20px', // Removed top padding here to handle it in headerArea
+  borderTop: '1px solid #1a1a1a',
+  overflow: 'hidden' 
+};
 
-const filterRow = { display: 'flex', gap: '10px', marginBottom: '20px' };
-const dateBox = { flex: 1, background: '#111', padding: '8px 12px', borderRadius: '12px', border: '1px solid #222', display: 'flex', flexDirection: 'column', gap: '4px' };
-const dateLabel = { fontSize: '0.6rem', color: '#555', textTransform: 'uppercase', fontWeight: 'bold' };
-const dateFlex = { display: 'flex', alignItems: 'center', gap: '6px' };
-const dateInput = { background: 'none', border: 'none', color: '#fff', fontSize: '0.8rem', outline: 'none', width: '100%' };
+// Added dedicated Header area with top margin for mobile notches
+const headerArea = { 
+  display: 'flex', 
+  justifyContent: 'space-between', 
+  alignItems: 'center', 
+  paddingTop: '30px', // Extra space at the very top
+  paddingBottom: '20px',
+  background: '#050505',
+  zIndex: 10
+};
 
-const tabContainer = { display: 'flex', background: '#111', padding: '4px', borderRadius: '14px', marginBottom: '20px', border: '1px solid #222' };
-const tabItem = { flex: 1, border: 'none', padding: '10px', borderRadius: '10px', fontSize: '0.8rem', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' };
+const avatar = { width: '40px', height: '40px', borderRadius: '10px', background: '#111', color: '#4caf50', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold', border: '1px solid #222' };
+const closeBtn = { background: '#111', border: 'none', color: '#fff', borderRadius: '50%', padding: '8px' };
 
-const ledgerScroll = { flex: 1, overflowY: 'auto', paddingRight: '4px' };
-const dateHeader = { fontSize: '0.75rem', color: '#4caf50', background: '#142514', padding: '4px 12px', borderRadius: '20px', display: 'inline-block', marginBottom: '16px' };
-const timelineContainer = { borderLeft: '1px solid #222', marginLeft: '8px', paddingLeft: '16px' };
-const logCard = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' };
+const payCard = { background: '#0a0a0a', padding: '15px', borderRadius: '20px', border: '1px solid #1a1a1a', marginBottom: '20px' };
+const inputWrap = { flex: 1, background: '#000', borderRadius: '12px', padding: '0 12px', display: 'flex', alignItems: 'center', border: '1px solid #222' };
+const pInput = { background: 'none', border: 'none', color: '#fff', padding: '10px 0', width: '100%', outline: 'none', fontSize: '1rem' };
+const pBtn = { background: '#4caf50', border: 'none', borderRadius: '10px', padding: '0 15px', fontWeight: 'bold' };
+const noteIn = { background: 'none', border: 'none', borderTop: '1px solid #1a1a1a', width: '100%', marginTop: '10px', paddingTop: '10px', color: '#555', fontSize: '0.8rem', outline: 'none' };
+
+const controlsRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' };
+const tabGroup = { display: 'flex', gap: '15px' };
+const tBtn = { background: 'none', border: 'none', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer' };
+
+const dateBox = { display: 'flex', gap: '10px', background: '#111', padding: '10px', borderRadius: '12px', marginBottom: '15px' };
+const dIn = { background: 'none', border: 'none', color: '#888', fontSize: '0.75rem', outline: 'none', width: '100%' };
+
+// --- FIXED SCROLL AREA ---
+const scrollArea = { 
+  flex: 1, 
+  overflowY: 'auto', 
+  paddingRight: '15px', // Extra space so scrollbar doesn't touch text
+  marginRight: '-10px', // Pulls scrollbar closer to the edge
+  scrollbarWidth: 'thin', // For Firefox
+  WebkitOverflowScrolling: 'touch' 
+};
+
+const dateHighlightContainer = { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' };
+const datePill = { fontSize: '0.65rem', color: '#4caf50', background: 'rgba(76, 175, 80, 0.1)', padding: '4px 10px', borderRadius: '20px', fontWeight: 'bold' };
+const dateLine = { flex: 1, height: '1px', background: '#111' };
+
+const logRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' };
+const logDesc = { fontSize: '0.85rem', color: '#eee', lineHeight: '1.4' };
+const logTime = { fontSize: '0.7rem', color: '#444', marginTop: '2px' };
 
 export default CustomerHistory;

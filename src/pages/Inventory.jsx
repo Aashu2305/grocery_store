@@ -1,108 +1,152 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { Package, Plus, Search, CheckCircle, AlertTriangle, Trash2 } from 'lucide-react';
+import { PlusCircle, Trash2, CheckCircle, Circle, ShoppingBasket, Archive } from 'lucide-react';
 
 const Inventory = () => {
   const [items, setItems] = useState([]);
-  const [search, setSearch] = useState('');
-  const [newItem, setNewItem] = useState('');
+  const [newItem, setNewItem] = useState({ name: '', description: '' });
 
-  useEffect(() => { fetchInventory(); }, []);
-
-  const fetchInventory = async () => {
-    const { data } = await supabase.from('inventory').select('*').order('name');
-    if (data) setItems(data);
-  };
-
-  const addItem = async () => {
-    if (!newItem) return;
-    const { error } = await supabase.from('inventory').insert([{ name: newItem, last_bought_at: new Date() }]);
-    if (!error) { setNewItem(''); fetchInventory(); }
-  };
-
-  const markAsBought = async (id) => {
-    await supabase.from('inventory').update({ last_bought_at: new Date() }).eq('id', id);
+  useEffect(() => {
     fetchInventory();
-  };
+  }, []);
 
-  const markAsOut = async (id) => {
-    await supabase.from('inventory').update({ last_bought_at: null }).eq('id', id);
-    fetchInventory();
-  };
-
-  const deleteItem = async (id) => {
-    if(window.confirm("Delete this item?")) {
-      await supabase.from('inventory').delete().eq('id', id);
-      fetchInventory();
+  async function fetchInventory() {
+    const { data, error } = await supabase.from('inventory').select('*');
+    if (error) {
+      console.error(error);
+    } else {
+      const now = new Date();
+      // 🕒 AUTO-REMOVE: Only show items that were bought less than 24 hours ago
+      const activeItems = (data || []).filter(item => {
+        if (!item.last_bought_at) return true; 
+        const lastBought = new Date(item.last_bought_at);
+        const hoursPassed = (now - lastBought) / (1000 * 60 * 60);
+        return hoursPassed < 24; 
+      });
+      setItems(activeItems);
     }
+  }
+
+  const addItem = async (e) => {
+    e.preventDefault();
+    if (!newItem.name.trim()) return;
+    
+    // Original Insert Logic
+    await supabase.from('inventory').insert([{ 
+      name: newItem.name.trim(), 
+      description: newItem.description.trim() 
+    }]);
+
+    setNewItem({ name: '', description: '' });
+    fetchInventory();
   };
+
+  const toggleBought = async (itemName, currentStatus) => {
+    // Original Toggle Logic
+    const timestamp = currentStatus ? null : new Date().toISOString();
+    const { error } = await supabase
+      .from('inventory')
+      .update({ last_bought_at: timestamp })
+      .eq('name', itemName);
+    
+    if (error) alert("Error: " + error.message);
+    else fetchInventory();
+  };
+
+  const deleteItem = async (itemName) => {
+    // Original Delete Logic
+    if (!window.confirm("Delete this item?")) return;
+    const { error } = await supabase.from('inventory').delete().eq('name', itemName);
+    if (error) alert("Delete failed");
+    else fetchInventory();
+  };
+
+  const toBuy = items.filter(item => !item.last_bought_at);
+  const alreadyBought = items.filter(item => item.last_bought_at);
 
   return (
-    <div style={containerStyle}>
-      <h2 style={{ color: '#2196f3', textAlign: 'center', marginBottom: '20px' }}>📦 Stock Room</h2>
+    <div style={pageWrapper}>
+      <h2 style={{ color: '#2196f3', textAlign: 'center', marginBottom: '20px', fontWeight: '800' }}>🛒 Stock Manager</h2>
 
-      {/* Add New Item */}
-      <div style={addBox}>
+      {/* Add Item Form with Description */}
+      <form onSubmit={addItem} style={cardStyle}>
         <input 
-          placeholder="New Item Name (e.g. Milk)" 
-          value={newItem} 
-          onChange={e => setNewItem(e.target.value)}
-          style={inputStyle}
+          placeholder="Item name (e.g. Sugar)" 
+          value={newItem.name} 
+          onChange={(e) => setNewItem({ ...newItem, name: e.target.value })} 
+          style={inputStyle} 
         />
-        <button onClick={addItem} style={addBtn}><Plus size={20} /></button>
-      </div>
-
-      {/* Search */}
-      <div style={searchWrapper}>
-        <Search size={18} color="#666" />
         <input 
-          placeholder="Search inventory..." 
-          style={searchInput} 
-          onChange={e => setSearch(e.target.value)} 
+          placeholder="Description (e.g. 5kg, Loose)" 
+          value={newItem.description} 
+          onChange={(e) => setNewItem({ ...newItem, description: e.target.value })} 
+          style={{ ...inputStyle, fontSize: '0.9rem', color: '#aaa', marginTop: '5px' }} 
         />
-      </div>
+        <button type="submit" style={addBtn}>
+          <PlusCircle size={20} /> Add Item
+        </button>
+      </form>
 
-      {/* List */}
-      <div style={{ marginTop: '20px' }}>
-        {items.filter(i => i.name.toLowerCase().includes(search.toLowerCase())).map(item => (
-          <div key={item.id} style={{...itemRow, borderLeft: item.last_bought_at ? '4px solid #4caf50' : '4px solid #ff4d4d'}}>
-            <div style={{ flex: 1 }}>
-              <strong style={{ fontSize: '1rem', color: item.last_bought_at ? '#fff' : '#ff4d4d' }}>
-                {item.name}
-              </strong>
-              <p style={{ margin: '4px 0 0 0', fontSize: '0.7rem', color: '#555' }}>
-                {item.last_bought_at ? `Last refill: ${new Date(item.last_bought_at).toLocaleDateString()}` : '🚨 OUT OF STOCK'}
-              </p>
-            </div>
-            
-            <div style={{ display: 'flex', gap: '10px' }}>
-              {item.last_bought_at ? (
-                <button onClick={() => markAsOut(item.id)} style={outBtn} title="Mark as Empty">
-                  <AlertTriangle size={18} />
-                </button>
-              ) : (
-                <button onClick={() => markAsBought(item.id)} style={refillBtn}>
-                  <CheckCircle size={18} /> Refill
-                </button>
-              )}
-              <button onClick={() => deleteItem(item.id)} style={delBtn}><Trash2 size={16} /></button>
-            </div>
+      {/* SECTION 1: NEEDS REFILL */}
+      <h3 style={sectionHeader}><ShoppingBasket size={18}/> Needs Refill ({toBuy.length})</h3>
+      {toBuy.map(item => (
+        <div key={item.name} style={itemRow}>
+          <div style={iconWrapper} onClick={() => toggleBought(item.name, false)}>
+            <Circle color="#888" size={24} />
           </div>
-        ))}
-      </div>
+          
+          <div style={itemContent}>
+            <span style={{ fontSize: '1.1rem', color: '#fff', fontWeight: 'bold', textTransform: 'capitalize' }}>{item.name}</span>
+            {item.description && <span style={descStyle}>{item.description}</span>}
+          </div>
+          
+          <button onClick={() => deleteItem(item.name)} style={deleteBtn}><Trash2 size={18}/></button>
+        </div>
+      ))}
+
+      {/* SECTION 2: BOUGHT */}
+      {alreadyBought.length > 0 && (
+        <>
+          <h3 style={{ ...sectionHeader, color: '#4caf50', marginTop: '30px' }}>
+            <Archive size={18}/> Already Brought ({alreadyBought.length})
+          </h3>
+          {alreadyBought.map(item => (
+            <div key={item.name} style={{ ...itemRow, background: '#142514', borderColor: '#2e7d32' }}>
+              <div style={iconWrapper} onClick={() => toggleBought(item.name, true)}>
+                <CheckCircle color="#4caf50" size={24} />
+              </div>
+              
+              <div style={itemContent}>
+                <span style={{ fontSize: '1.1rem', color: '#fff', textTransform: 'capitalize' }}>{item.name}</span>
+                {item.description && <span style={{ ...descStyle, color: '#5a8a5a' }}>{item.description}</span>}
+              </div>
+              
+              <button onClick={() => deleteItem(item.name)} style={deleteBtn}><Trash2 size={18}/></button>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 };
 
-const containerStyle = { maxWidth: '550px', margin: '0 auto', padding: '15px', paddingBottom: '100px' };
-const addBox = { display: 'flex', gap: '10px', marginBottom: '20px' };
-const inputStyle = { flex: 1, background: '#111', border: '1px solid #333', color: '#fff', padding: '12px', borderRadius: '12px', outline: 'none' };
-const addBtn = { background: '#2196f3', border: 'none', color: '#fff', padding: '0 15px', borderRadius: '12px', cursor: 'pointer' };
-const searchWrapper = { display: 'flex', alignItems: 'center', gap: '10px', background: '#111', padding: '12px', borderRadius: '12px', border: '1px solid #222' };
-const searchInput = { background: 'none', border: 'none', color: '#fff', outline: 'none', width: '100%' };
-const itemRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', padding: '15px', borderRadius: '15px', marginBottom: '10px', border: '1px solid #222' };
-const refillBtn = { background: '#4caf50', border: 'none', color: '#000', padding: '8px 12px', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px' };
-const outBtn = { background: '#ff4d4d22', border: '1px solid #ff4d4d', color: '#ff4d4d', padding: '8px', borderRadius: '8px' };
-const delBtn = { background: 'transparent', border: 'none', color: '#333', cursor: 'pointer' };
+// --- ✨ FIXED ALIGNMENT & THEME STYLES ---
+const pageWrapper = { 
+  maxWidth: '500px', 
+  margin: '0 auto', 
+  padding: '10px 20px', // FIX: Adds side margins so cards don't touch mobile edges
+  paddingBottom: '100px',
+  boxSizing: 'border-box'
+};
+
+const cardStyle = { display: 'flex', flexDirection: 'column', background: '#1e1e1e', padding: '15px', borderRadius: '12px', marginBottom: '20px', border: '1px solid #333' };
+const inputStyle = { padding: '12px', background: '#121212', border: '1px solid #333', color: '#fff', borderRadius: '8px', fontSize: '16px', outline: 'none' };
+const addBtn = { background: '#2196f3', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', fontWeight: 'bold', marginTop: '5px' };
+const sectionHeader = { fontSize: '0.85rem', color: '#aaa', textTransform: 'uppercase', letterSpacing: '1px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' };
+const itemRow = { display: 'flex', alignItems: 'center', padding: '12px', borderRadius: '12px', marginBottom: '8px', background: '#1e1e1e', border: '1px solid #333' };
+const iconWrapper = { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', cursor: 'pointer' };
+const itemContent = { flex: 1, display: 'flex', flexDirection: 'column', paddingLeft: '10px' };
+const descStyle = { fontSize: '0.85rem', color: '#777', marginTop: '2px' };
+const deleteBtn = { background: 'none', border: 'none', color: '#555', padding: '10px', cursor: 'pointer' };
 
 export default Inventory;
