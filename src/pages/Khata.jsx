@@ -20,7 +20,6 @@ const Khata = () => {
 
   useEffect(() => {
     fetchCustomers();
-    // 🖱️ Close suggestions when clicking outside
     const handleClickOutside = (event) => {
       if (suggestionRef.current && !suggestionRef.current.contains(event.target)) {
         setShowSuggestions(false);
@@ -36,8 +35,16 @@ const Khata = () => {
   };
 
   const fetchCustomers = async () => {
+    // 📂 Cache Load
+    const cached = localStorage.getItem('cache_customers');
+    if (cached) setCustomers(JSON.parse(cached));
+
     const { data } = await supabase.from('customers').select('*').order('name');
-    if (data) setCustomers(data);
+    if (data) {
+      setCustomers(data);
+      // 📂 Cache Save
+      localStorage.setItem('cache_customers', JSON.stringify(data));
+    }
   };
 
   const handleRefresh = async (customerId) => {
@@ -49,8 +56,18 @@ const Khata = () => {
   };
 
   const openHistory = async (customer) => {
+    // 📂 Cache Load (Specific Customer Logs)
+    const cachedLogs = localStorage.getItem(`logs_${customer.id}`);
+    if (cachedLogs) setHistory(JSON.parse(cachedLogs));
+
     const { data } = await supabase.from('transactions').select('*').eq('customer_id', customer.id).order('created_at', { ascending: false });
-    setHistory(data || []);
+    if (data) {
+      setHistory(data);
+      // 📂 Cache Save
+      localStorage.setItem(`logs_${customer.id}`, JSON.stringify(data));
+    } else {
+      setHistory([]);
+    }
     setSelectedCustomer(customer);
   };
 
@@ -108,7 +125,6 @@ const Khata = () => {
 
   return (
     <div style={containerStyle}>
-      {/* 🔔 Custom Toast Notification */}
       {toast.show && (
         <div style={{...toastStyle, backgroundColor: toast.type === 'success' ? '#4caf50' : '#ff4d4d'}}>
           {toast.type === 'success' ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
@@ -181,7 +197,6 @@ const Khata = () => {
         </div>
       </div>
 
-      {/* Search and List remains the same */}
       <div style={searchWrapper}>
         <Search size={18} color="#666" /><input placeholder="Search records..." style={searchInput} onChange={(e) => setSearch(e.target.value)} />
       </div>
@@ -208,7 +223,6 @@ const Khata = () => {
   );
 };
 
-// --- STYLES ---
 const containerStyle = { maxWidth: '550px', margin: '0 auto', padding: '15px', paddingBottom: '100px' };
 const quickBox = { background: '#1a1a1a', padding: '18px', borderRadius: '20px', border: '1px solid #4caf50', marginBottom: '20px' };
 const inputGroup = { display: 'flex', flexDirection: 'column', gap: '5px' };
@@ -223,11 +237,8 @@ const searchWrapper = { display: 'flex', alignItems: 'center', gap: '10px', back
 const searchInput = { background: 'none', border: 'none', color: '#fff', outline: 'none', width: '100%' };
 const customerRow = { display: 'flex', justifyContent: 'space-between', padding: '15px', background: '#1e1e1e', borderRadius: '15px', marginBottom: '8px', alignItems: 'center', cursor: 'pointer', border: '1px solid #222' };
 const avatarCircle = { minWidth: '35px', height: '35px', borderRadius: '50%', background: '#333', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold', color: '#4caf50' };
-
 const suggestionList = { position: 'absolute', top: '100%', left: 0, right: 0, background: '#111', borderRadius: '0 0 10px 10px', border: '1px solid #333', zIndex: 10, marginTop: '-2px' };
 const suggestionItem = { padding: '12px', color: '#4caf50', fontSize: '0.85rem', borderBottom: '1px solid #222', cursor: 'pointer', textTransform: 'capitalize' };
-
-// ✨ Toast Style
 const toastStyle = { position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', padding: '12px 20px', borderRadius: '50px', color: '#fff', fontWeight: 'bold', zIndex: 9999, display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 5px 15px rgba(0,0,0,0.5)', transition: 'all 0.3s ease' };
 
 export default Khata;

@@ -11,12 +11,13 @@ const Inventory = () => {
   }, []);
 
   async function fetchInventory() {
+    // 📂 Cache Load
+    const cached = localStorage.getItem('cache_inventory');
+    if (cached) setItems(JSON.parse(cached));
+
     const { data, error } = await supabase.from('inventory').select('*');
-    if (error) {
-      console.error(error);
-    } else {
+    if (!error) {
       const now = new Date();
-      // 🕒 AUTO-REMOVE: Only show items that were bought less than 24 hours ago
       const activeItems = (data || []).filter(item => {
         if (!item.last_bought_at) return true; 
         const lastBought = new Date(item.last_bought_at);
@@ -24,6 +25,8 @@ const Inventory = () => {
         return hoursPassed < 24; 
       });
       setItems(activeItems);
+      // 📂 Cache Save
+      localStorage.setItem('cache_inventory', JSON.stringify(activeItems));
     }
   }
 
@@ -31,7 +34,6 @@ const Inventory = () => {
     e.preventDefault();
     if (!newItem.name.trim()) return;
     
-    // Original Insert Logic
     await supabase.from('inventory').insert([{ 
       name: newItem.name.trim(), 
       description: newItem.description.trim() 
@@ -42,23 +44,19 @@ const Inventory = () => {
   };
 
   const toggleBought = async (itemName, currentStatus) => {
-    // Original Toggle Logic
     const timestamp = currentStatus ? null : new Date().toISOString();
-    const { error } = await supabase
+    await supabase
       .from('inventory')
       .update({ last_bought_at: timestamp })
       .eq('name', itemName);
     
-    if (error) alert("Error: " + error.message);
-    else fetchInventory();
+    fetchInventory();
   };
 
   const deleteItem = async (itemName) => {
-    // Original Delete Logic
     if (!window.confirm("Delete this item?")) return;
-    const { error } = await supabase.from('inventory').delete().eq('name', itemName);
-    if (error) alert("Delete failed");
-    else fetchInventory();
+    await supabase.from('inventory').delete().eq('name', itemName);
+    fetchInventory();
   };
 
   const toBuy = items.filter(item => !item.last_bought_at);
@@ -68,7 +66,6 @@ const Inventory = () => {
     <div style={pageWrapper}>
       <h2 style={{ color: '#2196f3', textAlign: 'center', marginBottom: '20px', fontWeight: '800' }}>🛒 Stock Manager</h2>
 
-      {/* Add Item Form with Description */}
       <form onSubmit={addItem} style={cardStyle}>
         <input 
           placeholder="Item name (e.g. Sugar)" 
@@ -87,24 +84,20 @@ const Inventory = () => {
         </button>
       </form>
 
-      {/* SECTION 1: NEEDS REFILL */}
       <h3 style={sectionHeader}><ShoppingBasket size={18}/> Needs Refill ({toBuy.length})</h3>
       {toBuy.map(item => (
         <div key={item.name} style={itemRow}>
           <div style={iconWrapper} onClick={() => toggleBought(item.name, false)}>
             <Circle color="#888" size={24} />
           </div>
-          
           <div style={itemContent}>
             <span style={{ fontSize: '1.1rem', color: '#fff', fontWeight: 'bold', textTransform: 'capitalize' }}>{item.name}</span>
             {item.description && <span style={descStyle}>{item.description}</span>}
           </div>
-          
           <button onClick={() => deleteItem(item.name)} style={deleteBtn}><Trash2 size={18}/></button>
         </div>
       ))}
 
-      {/* SECTION 2: BOUGHT */}
       {alreadyBought.length > 0 && (
         <>
           <h3 style={{ ...sectionHeader, color: '#4caf50', marginTop: '30px' }}>
@@ -115,12 +108,10 @@ const Inventory = () => {
               <div style={iconWrapper} onClick={() => toggleBought(item.name, true)}>
                 <CheckCircle color="#4caf50" size={24} />
               </div>
-              
               <div style={itemContent}>
                 <span style={{ fontSize: '1.1rem', color: '#fff', textTransform: 'capitalize' }}>{item.name}</span>
                 {item.description && <span style={{ ...descStyle, color: '#5a8a5a' }}>{item.description}</span>}
               </div>
-              
               <button onClick={() => deleteItem(item.name)} style={deleteBtn}><Trash2 size={18}/></button>
             </div>
           ))}
@@ -130,15 +121,7 @@ const Inventory = () => {
   );
 };
 
-// --- ✨ FIXED ALIGNMENT & THEME STYLES ---
-const pageWrapper = { 
-  maxWidth: '500px', 
-  margin: '0 auto', 
-  padding: '10px 20px', // FIX: Adds side margins so cards don't touch mobile edges
-  paddingBottom: '100px',
-  boxSizing: 'border-box'
-};
-
+const pageWrapper = { maxWidth: '500px', margin: '0 auto', padding: '10px 20px', paddingBottom: '100px', boxSizing: 'border-box' };
 const cardStyle = { display: 'flex', flexDirection: 'column', background: '#1e1e1e', padding: '15px', borderRadius: '12px', marginBottom: '20px', border: '1px solid #333' };
 const inputStyle = { padding: '12px', background: '#121212', border: '1px solid #333', color: '#fff', borderRadius: '8px', fontSize: '16px', outline: 'none' };
 const addBtn = { background: '#2196f3', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', fontWeight: 'bold', marginTop: '5px' };
