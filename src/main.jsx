@@ -10,12 +10,11 @@ createRoot(document.getElementById('root')).render(
 )
 
 // ⚡ OFFLINE MODE: Register Service Worker
-// ... (your existing imports and render code)
-
+// This allows the app to load even when there is no Wi-Fi
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
-      .then(reg => console.log('SW Registered!'))
-      .catch(err => console.log('SW Failed:', err));
+      .then(reg => console.log('🚀 Offline Mode Ready: SW Registered!'))
+      .catch(err => console.log('❌ SW Registration Failed:', err));
   });
 }

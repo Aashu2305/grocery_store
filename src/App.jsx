@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from './supabaseClient';
 import { 
-  ShoppingCart, BookOpen, IndianRupee, Home as HomeIcon, Zap, ChevronRight, Package, ShoppingBasket, Lock, User, ShieldCheck
+  ShoppingCart, BookOpen, User, ShieldCheck, ShoppingBag, 
+  Package, CheckCircle2, Wallet, Eye, EyeOff, ChevronRight, Lock,
+  Home as HomeIcon 
 } from 'lucide-react';
 
 import Khata from './pages/Khata'; 
 import Inventory from './pages/Inventory';
+import PurchaseHistory from './pages/PurchaseHistory';
 
 // --- 🔐 LOGIN PAGE COMPONENT ---
 const Login = ({ onLogin }) => {
@@ -19,13 +22,7 @@ const Login = ({ onLogin }) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-
-    // Credentials Logic
-    const users = {
-      'owner': '6111',
-      'developer': '3853'
-    };
-
+    const users = { 'owner': '6111', 'developer': '3853' };
     setTimeout(() => {
       if (users[id.toLowerCase()] === pw) {
         localStorage.setItem('shop_session', id.toLowerCase());
@@ -41,35 +38,19 @@ const Login = ({ onLogin }) => {
     <div style={loginOverlay}>
       <div style={loginGlow} />
       <div style={loginCard}>
-        <div style={iconHeader}>
-          <ShieldCheck size={40} color="#4caf50" />
-        </div>
+        <div style={iconHeader}><ShieldCheck size={44} color="#4caf50" /></div>
         <h2 style={loginTitle}>Shop Access</h2>
         <p style={loginSub}>Secure Terminal v2.0</p>
-
         <form onSubmit={handleLogin} style={loginForm}>
           <div style={loginInputWrapper}>
-            <User size={18} color="#666" style={loginIcon} />
-            <input 
-              placeholder="User ID" 
-              value={id} 
-              onChange={e => setId(e.target.value)} 
-              style={loginInput} 
-            />
+            <User size={20} color="#666" style={loginIcon} />
+            <input placeholder="User ID" value={id} onChange={e => setId(e.target.value)} style={loginInput} />
           </div>
           <div style={loginInputWrapper}>
-            <Lock size={18} color="#666" style={loginIcon} />
-            <input 
-              type="password"
-              placeholder="Security PIN" 
-              value={pw} 
-              onChange={e => setPw(e.target.value)} 
-              style={loginInput} 
-            />
+            <Lock size={20} color="#666" style={loginIcon} />
+            <input type="password" placeholder="Security PIN" value={pw} onChange={e => setPw(e.target.value)} style={loginInput} />
           </div>
-          
           {error && <p style={errorText}>{error}</p>}
-
           <button type="submit" disabled={loading} style={loginBtn}>
             {loading ? 'Authenticating...' : 'Unlock System'}
           </button>
@@ -85,9 +66,44 @@ const Home = () => {
   const [alerts, setAlerts] = useState([]);
   const [stats, setStats] = useState({ totalUdhaar: 0, topDebtors: [] });
   const [showDebtors, setShowDebtors] = useState(false);
+  const [isAmountHidden, setIsAmountHidden] = useState(false); 
   const navigate = useNavigate();
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good Morning";
+    if (hour < 17) return "Good Afternoon";
+    return "Good Evening";
+  };
+
   useEffect(() => { 
+    // 🚀 1. LOAD INSTANTLY FROM MASTER JSON
+    const cachedRaw = localStorage.getItem('master_khata_db');
+    if (cachedRaw) {
+      try {
+        const parsed = JSON.parse(cachedRaw);
+        
+        // 🛡️ Bulletproof extraction: handles both array and object formats
+        let customerList = [];
+        if (Array.isArray(parsed)) {
+          customerList = parsed;
+        } else if (parsed && Array.isArray(parsed.customers)) {
+          customerList = parsed.customers;
+        }
+        
+        if (customerList.length > 0) {
+          const total = customerList.reduce((sum, c) => sum + (Number(c.balance) || 0), 0);
+          setStats({ 
+            totalUdhaar: total, 
+            topDebtors: customerList.filter(c => c.balance > 0).sort((a, b) => b.balance - a.balance) 
+          });
+        }
+      } catch (e) {
+        console.error("Cache corrupted, clearing...");
+        localStorage.removeItem('master_khata_db');
+      }
+    }
+
     fetchDashboardData(); 
     window.addEventListener('focus', fetchDashboardData);
     return () => window.removeEventListener('focus', fetchDashboardData);
@@ -95,125 +111,152 @@ const Home = () => {
 
   async function fetchDashboardData() {
     try {
-      const cachedStock = localStorage.getItem('cache_stock');
-      const cachedStats = localStorage.getItem('cache_stats');
-      if (cachedStock) {
-        const s = JSON.parse(cachedStock);
-        setEmptyCount(s.count);
-        setAlerts(s.alerts);
-      }
-      if (cachedStats) setStats(JSON.parse(cachedStats));
-
       const { data: stockData } = await supabase.from('inventory').select('*');
       if (stockData) {
-        const now = new Date();
-        const emptyItems = stockData.filter(item => {
-          if (!item.last_bought_at) return true;
-          const lastBought = new Date(item.last_bought_at);
-          return (now - lastBought) / (1000 * 60 * 60) > 24;
-        });
-        const stockUpdate = { count: emptyItems.length, alerts: emptyItems.slice(0, 3).map(i => i.name) };
-        setEmptyCount(stockUpdate.count);
-        setAlerts(stockUpdate.alerts);
-        localStorage.setItem('cache_stock', JSON.stringify(stockUpdate));
+        const needsPurchase = stockData.filter(item => item.is_bought === false); 
+        setEmptyCount(needsPurchase.length);
+        setAlerts(needsPurchase.slice(0, 3).map(i => i.name));
       }
 
       const { data: customerData } = await supabase.from('customers').select('*').order('balance', { ascending: false });
       if (customerData) {
-        const total = customerData.reduce((sum, c) => sum + (c.balance || 0), 0);
-        const statsUpdate = { totalUdhaar: total, topDebtors: customerData.filter(c => c.balance > 0) };
-        setStats(statsUpdate);
-        localStorage.setItem('cache_stats', JSON.stringify(statsUpdate));
+        const total = customerData.reduce((sum, c) => sum + (Number(c.balance) || 0), 0);
+        setStats({ 
+          totalUdhaar: total, 
+          topDebtors: customerData.filter(c => c.balance > 0) 
+        });
+        
+        // 🚀 2. SYNC BACK TO MASTER JSON
+        const cachedRaw = localStorage.getItem('master_khata_db');
+        let currentDb = { customers: [], history: {} };
+        if (cachedRaw) {
+            try {
+                const parsed = JSON.parse(cachedRaw);
+                currentDb = Array.isArray(parsed) ? { customers: parsed, history: {} } : parsed;
+            } catch(e) {}
+        }
+        currentDb.customers = customerData;
+        localStorage.setItem('master_khata_db', JSON.stringify(currentDb));
       }
-    } catch (err) { console.error(err); }
+    } catch (err) { 
+      console.error("Sync Error", err); 
+    }
   }
 
   return (
     <div style={homeContainer}>
+      <style>{`
+        @keyframes auraPulse {
+          0% { box-shadow: 0 0 10px rgba(255, 193, 7, 0.1); }
+          50% { box-shadow: 0 0 25px rgba(255, 193, 7, 0.3); }
+          100% { box-shadow: 0 0 10px rgba(255, 193, 7, 0.1); }
+        }
+        .aura-card { animation: auraPulse 4s infinite ease-in-out; }
+        * { -webkit-tap-highlight-color: transparent; outline: none; }
+      `}</style>
+
       <header style={headerStyle}>
         <div>
-          <h1 style={welcomeText}>Namaste, Surendra! 👋</h1>
-          <p style={subText}>Your shop's pulse for today</p>
+          <p style={greetingText}>{getGreeting()},</p>
+          <h1 style={welcomeText}>Surendra 👋</h1>
         </div>
-        <div style={statusDot} />
+        <div style={profileCircle}><User color="#4caf50" size={28} /></div>
       </header>
 
-      {/* 🔴 Total Udhaar Section */}
-      <div 
+      {/* --- UDHAAR PULSE CARD --- */}
+      <section 
         onClick={() => setShowDebtors(!showDebtors)} 
-        style={{...glassCard, border: '1px solid rgba(255, 77, 77, 0.3)', cursor: 'pointer', marginBottom: '20px'}}
+        className="aura-card"
+        style={{
+          ...pulseCard, 
+          borderColor: showDebtors ? '#ffc107' : 'rgba(255, 193, 7, 0.2)',
+          transform: showDebtors ? 'scale(1.02)' : 'scale(1)',
+          transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={cardHeader}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <p style={{...cardLabel, color: '#ffc107', fontSize: '0.8rem'}}> TOTAL UDHAAR</p>
+              <button onClick={(e) => { e.stopPropagation(); setIsAmountHidden(!isAmountHidden); }} style={privacyBtn}>
+                {isAmountHidden ? <EyeOff size={18} color="#7c2a2a" /> : <Eye size={18} color="#e5f553" />}
+              </button>
+            </div>
+            <h2 style={pulseValue}>{isAmountHidden ? '₹ XXX,XXX' : `₹${stats.totalUdhaar}`}</h2>
+          </div>
+          <div style={pulseIconBox}><Wallet size={28} color="#ffc107" fill="rgba(255, 193, 7, 0.2)" /></div>
+        </div>
+
+        <div style={{...expandableDebtors, maxHeight: showDebtors ? '400px' : '0px', transition: '0.5s ease'}}>
+          <div style={debtorDivider} />
+          {stats.topDebtors.length > 0 ? stats.topDebtors.slice(0, 5).map(c => (
+            <div key={c.id} style={debtorRow}>
+              <span style={{...debtorName, fontSize: '1rem', fontWeight: '700'}}>{c.name}</span>
+              <span style={{...debtorAmt, fontSize: '1.1rem'}}>₹{c.balance}</span>
+            </div>
+          )) : <p style={noDataText}>No pending udhaar. Clean slate! 🔥</p>}
+          <button onClick={(e) => { e.stopPropagation(); navigate('/khata'); }} style={fullLedgerBtn}>
+            MANAGE LEDGER <ChevronRight size={18} />
+          </button>
+        </div>
+
+        <div style={{ width: '100%', display: 'flex', justifyContent: 'center', marginTop: showDebtors ? '15px' : '10px', paddingBottom: '10px' }}>
+          <div style={{ width: '30px', height: '4px', background: showDebtors ? '#ffc107' : '#222', borderRadius: '10px' }} />
+        </div>
+      </section>
+
+      <h3 style={sectionLabel}>Quick Tools</h3>
+      <div style={bentoGrid}>
+        <Link to="/khata" style={{...bentoTile, gridColumn: 'span 2', background: '#111', padding: '22px 24px', flexDirection: 'row', alignItems: 'center'}}>
+          <div style={{...tileIcon, background: 'rgba(76, 175, 80, 0.15)', width: '46px', height: '46px'}}><BookOpen color="#4caf50" size={24} /></div>
+          <div style={{flex: 1, marginLeft: '16px'}}>
+            <h4 style={{...tileTitle, fontSize: '1.2rem'}}>Daily Khata</h4>
+            <p style={{...tileSub, color: '#888', fontSize: '0.9rem', fontWeight: '700'}}>Ledger & Customer Udhari</p>
+          </div>
+          <ChevronRight size={22} color="#4caf50" />
+        </Link>
+        <Link to="/purchases" style={bentoTile}>
+          <div style={{...tileIcon, background: 'rgba(255, 152, 0, 0.15)'}}><ShoppingBag color="#ff9800" size={24} /></div>
           <div>
-            <p style={{...cardLabel, color: '#ff4d4d'}}><IndianRupee size={12} /> Total Udhaar</p>
-            <h2 style={{...cardValue, color: '#ff4d4d', fontSize: '2.2rem'}}>₹{stats.totalUdhaar}</h2>
+            <h4 style={tileTitle}>BILLS</h4>
+            <p style={{...tileSub, color: '#666', fontSize: '0.75rem'}}>History</p>
           </div>
-          <ChevronRight color="#ff4d4d" style={{ transform: showDebtors ? 'rotate(90deg)' : 'none', transition: '0.3s' }} />
-        </div>
-        {showDebtors && (
-          <div style={debtorList}>
-            {stats.topDebtors.slice(0, 5).map(c => (
-              <div key={c.id} style={debtorRow}>
-                <span style={{textTransform: 'capitalize'}}>{c.name}</span>
-                <span style={{color: '#ff4d4d', fontWeight: 'bold'}}>₹{c.balance}</span>
-              </div>
-            ))}
-            <button onClick={(e) => { e.stopPropagation(); navigate('/khata'); }} style={viewAllBtn}>View Full Ledger</button>
-          </div>
-        )}
-      </div>
-
-      <h3 style={sectionTitle}>Main Terminal</h3>
-      
-      <Link to="/khata" style={bigActionCard}>
-        <div style={{...iconBox, background: 'rgba(76, 175, 80, 0.1)'}}><BookOpen color="#4caf50" size={28} /></div>
-        <div style={{flex: 1}}><h4 style={actionTitle}>Ledger</h4><p style={actionSub}>Instant Entry & Records</p></div>
-        <ChevronRight color="#333" />
-      </Link>
-
-      <div style={actionGrid}>
-        <Link to="/inventory" style={{...actionCard, textDecoration: 'none'}}>
-          <div style={{...iconBox, background: 'rgba(255, 77, 77, 0.1)'}}><Package color="#ff4d4d" /></div>
-          <span style={{...actionLabel, color: '#ff4d4d'}}>{emptyCount} Items Empty</span>
         </Link>
-
-        <Link to="/inventory" style={{...actionCard, textDecoration: 'none'}}>
-          <div style={{...iconBox, background: 'rgba(76, 175, 80, 0.1)'}}><ShoppingBasket color="#4caf50" /></div>
-          <div style={refillListWrapper}>
-            {alerts.length > 0 ? alerts.map((name, i) => (<p key={i} style={refillItemText}>• {name}</p>)) : <span style={{...actionLabel, color: '#4caf50'}}>Stock Full ✅</span>}
+        <Link to="/inventory" style={bentoTile}>
+          <div style={{...tileIcon, background: emptyCount > 0 ? 'rgba(255, 77, 77, 0.15)' : 'rgba(76, 175, 80, 0.15)'}}>
+            {emptyCount > 0 ? <Package color="#ff4d4d" size={24} /> : <CheckCircle2 color="#4caf50" size={24} />}
+          </div>
+          <div>
+            <h4 style={tileTitle}>Stock</h4>
+            {emptyCount > 0 ? alerts.map((name, i) => (<p key={i} style={{...miniAlertText, color: '#ff9999', fontSize: '0.8rem', fontWeight: '800'}}>• {name}</p>)) : (<p style={{...tileSub, color: '#4caf50', fontSize: '0.85rem', fontWeight: '700'}}>Stock Full ✅</p>)}
           </div>
         </Link>
       </div>
-
-      <Link to="/inventory" style={alignedAlert(emptyCount > 0)}>
-        <div style={alertIconBox(emptyCount > 0)}><Zap size={20} fill={emptyCount > 0 ? "#ff4d4d" : "#4caf50"} color={emptyCount > 0 ? "#ff4d4d" : "#4caf50"} /></div>
-        <div style={{ flex: 1 }}>
-          <h4 style={{ margin: 0, color: '#fff' }}>{emptyCount > 0 ? "Restock Alert!" : "Stock is Full"}</h4>
-          <p style={{ margin: 0, fontSize: '0.8rem', color: emptyCount > 0 ? '#ff9999' : '#99ff99' }}>{emptyCount > 0 ? `${emptyCount} items need attention` : "Everything looks good!"}</p>
-        </div>
-        <ChevronRight size={18} color={emptyCount > 0 ? "#ff4d4d" : "#4caf50"} />
-      </Link>
     </div>
   );
 };
 
-// --- 🧭 NAVIGATION & MAIN WRAPPER ---
+// --- 🧭 NAVIGATION ---
 const BottomNav = () => {
   const location = useLocation();
   const isActive = (p) => location.pathname === p;
   return (
     <nav style={navBar}>
-      <Link to="/" style={{ ...navItem, color: isActive('/') ? '#4caf50' : '#444' }}>
-        <HomeIcon size={22} strokeWidth={isActive('/') ? 2.5 : 2} />
-        <span>Home</span>
+      <Link to="/" style={{ ...navItem, color: isActive('/') ? '#4caf50' : '#888' }}>
+        <HomeIcon size={26} strokeWidth={isActive('/') ? 3 : 2} />
+        <span style={{fontSize: '0.75rem'}}>Home</span>
       </Link>
-      <Link to="/khata" style={{ ...navItem, color: isActive('/khata') ? '#4caf50' : '#444' }}>
-        <BookOpen size={22} strokeWidth={isActive('/khata') ? 2.5 : 2} />
-        <span>Khata</span>
+      <Link to="/khata" style={{ ...navItem, color: isActive('/khata') ? '#4caf50' : '#888' }}>
+        <BookOpen size={26} strokeWidth={isActive('/khata') ? 3 : 2} />
+        <span style={{fontSize: '0.75rem'}}>Ledger</span>
       </Link>
-      <Link to="/inventory" style={{ ...navItem, color: isActive('/inventory') ? '#4caf50' : '#444' }}>
-        <ShoppingCart size={22} strokeWidth={isActive('/inventory') ? 2.5 : 2} />
-        <span>Stock</span>
+      <Link to="/purchases" style={{ ...navItem, color: isActive('/purchases') ? '#ff9800' : '#888' }}>
+        <ShoppingBag size={26} strokeWidth={isActive('/purchases') ? 3 : 2} />
+        <span style={{fontSize: '0.75rem'}}>Bills</span>
+      </Link>
+      <Link to="/inventory" style={{ ...navItem, color: isActive('/inventory') ? '#4caf50' : '#888' }}>
+        <ShoppingCart size={26} strokeWidth={isActive('/inventory') ? 3 : 2} />
+        <span style={{fontSize: '0.75rem'}}>Stock</span>
       </Link>
     </nav>
   );
@@ -221,11 +264,7 @@ const BottomNav = () => {
 
 function App() {
   const [user, setUser] = useState(localStorage.getItem('shop_session'));
-
-  if (!user) {
-    return <Login onLogin={(u) => setUser(u)} />;
-  }
-
+  if (!user) return <Login onLogin={(u) => setUser(u)} />;
   return (
     <Router>
       <div style={{ background: '#050505', minHeight: '100vh', color: '#fff', position: 'relative' }}>
@@ -233,6 +272,7 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/khata" element={<Khata />} />
           <Route path="/inventory" element={<Inventory />} />
+          <Route path="/purchases" element={<PurchaseHistory />} />
         </Routes>
         <BottomNav />
       </div>
@@ -241,8 +281,6 @@ function App() {
 }
 
 // --- ✨ STYLES ---
-
-// LOGIN STYLES
 const loginOverlay = { height: '100vh', width: '100%', background: '#000', display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative', overflow: 'hidden' };
 const loginGlow = { position: 'absolute', width: '250px', height: '250px', background: 'rgba(76, 175, 80, 0.15)', filter: 'blur(100px)', borderRadius: '50%' };
 const loginCard = { width: '85%', maxWidth: '350px', background: 'rgba(255, 255, 255, 0.03)', backdropFilter: 'blur(20px)', padding: '40px 30px', borderRadius: '32px', border: '1px solid rgba(255, 255, 255, 0.08)', textAlign: 'center', zIndex: 10 };
@@ -255,32 +293,32 @@ const loginIcon = { position: 'absolute', left: '15px' };
 const loginInput = { width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid #222', padding: '15px 15px 15px 45px', borderRadius: '16px', color: '#fff', fontSize: '1rem', outline: 'none' };
 const loginBtn = { background: '#4caf50', color: '#000', border: 'none', padding: '16px', borderRadius: '16px', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px', boxShadow: '0 10px 20px rgba(76, 175, 80, 0.2)' };
 const errorText = { color: '#ff4d4d', fontSize: '0.85rem', margin: '5px 0' };
-
-// (Keep all Home/Nav styles exactly as they were before)
-const homeContainer = { maxWidth: '500px', margin: '0 auto', padding: '24px', paddingBottom: '120px' };
+const homeContainer = { maxWidth: '500px', margin: '0 auto', padding: '24px', paddingBottom: '130px', fontFamily: 'system-ui, sans-serif' };
 const headerStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
-const welcomeText = { fontSize: '1.6rem', margin: 0, fontWeight: '800' };
-const subText = { color: '#666', fontSize: '0.85rem', margin: '4px 0 0 0' };
-const statusDot = { width: '10px', height: '10px', background: '#4caf50', borderRadius: '50%', boxShadow: '0 0 10px #4caf50' };
-const glassCard = { background: 'rgba(255, 255, 255, 0.03)', padding: '20px', borderRadius: '24px' };
-const cardLabel = { margin: 0, fontSize: '0.7rem', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' };
-const cardValue = { margin: '8px 0', fontWeight: '900' };
-const debtorList = { marginTop: '15px', paddingTop: '15px', borderTop: '1px solid rgba(255,255,255,0.05)' };
-const debtorRow = { display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', marginBottom: '8px', color: '#ccc' };
-const viewAllBtn = { width: '100%', background: 'transparent', border: '1px solid #333', color: '#888', padding: '10px', borderRadius: '12px', marginTop: '10px', fontSize: '0.8rem', cursor: 'pointer' };
-const sectionTitle = { fontSize: '0.85rem', color: '#444', marginBottom: '15px', fontWeight: 'bold', textTransform: 'uppercase' };
-const bigActionCard = { display: 'flex', alignItems: 'center', gap: '15px', background: '#111', padding: '20px', borderRadius: '24px', textDecoration: 'none', border: '1px solid #1a1a1a', marginBottom: '16px' };
-const actionTitle = { color: '#fff', margin: 0, fontSize: '1.1rem' };
-const actionSub = { color: '#555', margin: 0, fontSize: '0.75rem' };
-const actionGrid = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' };
-const actionCard = { background: '#111', padding: '15px', borderRadius: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', border: '1px solid #1a1a1a' };
-const iconBox = { padding: '12px', borderRadius: '16px' };
-const actionLabel = { color: '#fff', fontSize: '0.8rem', fontWeight: 'bold' };
-const refillListWrapper = { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%', gap: '2px', overflow: 'hidden' };
-const refillItemText = { fontSize: '0.65rem', color: '#aaa', margin: 0, textTransform: 'capitalize', textAlign: 'left', width: '100%' };
-const alignedAlert = (hasItems) => ({ display: 'flex', alignItems: 'center', gap: '15px', textDecoration: 'none', background: hasItems ? 'rgba(255, 77, 77, 0.1)' : 'rgba(76, 175, 80, 0.1)', border: `1px solid ${hasItems ? 'rgba(255, 77, 77, 0.2)' : 'rgba(76, 175, 80, 0.2)'}`, padding: '16px', borderRadius: '24px' });
-const alertIconBox = (hasItems) => ({ background: '#000', padding: '10px', borderRadius: '16px', border: `1px solid ${hasItems ? 'rgba(255, 77, 77, 0.2)' : 'rgba(76, 175, 80, 0.2)'}` });
-const navBar = { position: 'fixed', bottom: '15px', left: '15px', right: '15px', background: 'rgba(10, 10, 10, 0.8)', backdropFilter: 'blur(20px)', display: 'flex', justifyContent: 'space-around', padding: '12px', borderRadius: '24px', border: '1px solid rgba(255,255,255,0.05)', zIndex: 1000 };
-const navItem = { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', textDecoration: 'none', fontSize: '0.65rem', fontWeight: 'bold' };
+const greetingText = { margin: 0, color: '#666', fontSize: '0.9rem', fontWeight: '500' };
+const welcomeText = { margin: 0, fontSize: '1.8rem', fontWeight: '900', color: '#fff', letterSpacing: '-0.5px' };
+const profileCircle = { width: '48px', height: '48px', background: '#111', borderRadius: '16px', display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative', border: '1px solid #222' };
+const pulseCard = { position: 'relative', background: '#0a0a0a', padding: '24px 24px 10px 24px', borderRadius: '32px', border: '1px solid', overflow: 'hidden' };
+const cardHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2, cursor: 'pointer' };
+const cardLabel = { margin: 0, fontSize: '0.7rem', fontWeight: '800', letterSpacing: '1.5px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' };
+const pulseValue = { margin: '10px 0 0 0', fontSize: '1.6rem', fontWeight: '800', color: '#fff' };
+const pulseIconBox = { background: 'rgba(255, 193, 7, 0.1)', padding: '12px', borderRadius: '18px', border: '1px solid rgba(255, 193, 7, 0.2)' };
+const privacyBtn = { background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '8px', padding: '6px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const expandableDebtors = { overflow: 'hidden' };
+const debtorDivider = { height: '1px', background: 'rgba(255,255,255,0.05)', margin: '20px 0' };
+const debtorRow = { display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '0.95rem' };
+const debtorName = { color: '#aaa', textTransform: 'capitalize' };
+const debtorAmt = { color: '#fff', fontWeight: 'bold' };
+const noDataText = { color: '#555', fontSize: '0.85rem', fontStyle: 'italic' };
+const fullLedgerBtn = { width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid #222', color: '#fff', padding: '12px', borderRadius: '14px', marginTop: '10px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' };
+const sectionLabel = { fontSize: '0.9rem', color: '#666', fontWeight: '900', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '16px', marginTop: '30px' };
+const bentoGrid = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' };
+const bentoTile = { background: '#111', padding: '20px', borderRadius: '28px', border: '1px solid #1a1a1a', textDecoration: 'none', display: 'flex', flexDirection: 'column', gap: '12px' };
+const tileIcon = { width: '42px', height: '42px', borderRadius: '14px', display: 'flex', justifyContent: 'center', alignItems: 'center' };
+const tileTitle = { margin: 0, color: '#fff', fontSize: '1.1rem', fontWeight: '800' };
+const tileSub = { margin: '4px 0 0 0', lineHeight: '1.2' };
+const miniAlertText = { margin: 0, fontSize: '0.8rem', color: '#888', display: 'flex', alignItems: 'center', gap: '5px', textTransform: 'capitalize' };
+const navBar = { position: 'fixed', bottom: '15px', left: '10px', right: '10px', background: '#0a0a0a', border: '2px solid #1a1a1a', display: 'flex', justifyContent: 'space-around', padding: '12px 5px', borderRadius: '20px', zIndex: 1000, boxShadow: '0 -5px 20px rgba(0,0,0,0.5)' };
+const navItem = { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '5px', textDecoration: 'none', fontWeight: '800' };
 
 export default App;

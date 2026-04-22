@@ -1,21 +1,36 @@
-const CACHE_NAME = 'shop-khata-v2';
+const CACHE_NAME = 'khata-v1';
+const assetsToCache = [
+  '/',
+  '/index.html',
+  '/manifest.json',
+  // Add other static assets like logo.png if you have them
+];
 
-// 🛠️ 1. Install: Force the service worker to activate immediately
+// Install: Cache the app shell
 self.addEventListener('install', (event) => {
-  self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(assetsToCache);
+    })
+  );
 });
 
-// 🛠️ 2. Activate: Clean up old caches
+// Activate: Clean up old caches
 self.addEventListener('activate', (event) => {
-  event.waitUntil(clients.claim());
+  event.waitUntil(
+    caches.keys().then((keys) => {
+      return Promise.all(
+        keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
+      );
+    })
+  );
 });
 
-// 🛠️ 3. Fetch: The "Network First, then Cache" strategy
-// This tries the internet first, but if it fails, it pulls the UI from the phone
+// Fetch: Serve from cache if offline
 self.addEventListener('fetch', (event) => {
   event.respondWith(
-    fetch(event.request).catch(() => {
-      return caches.match(event.request) || caches.match('/');
+    caches.match(event.request).then((response) => {
+      return response || fetch(event.request);
     })
   );
 });

@@ -1,198 +1,206 @@
 import React, { useState, useEffect } from 'react';
-import { X, ArrowUpCircle, ArrowDownCircle, CreditCard, Calendar } from 'lucide-react';
+import { X, ArrowUpCircle, ArrowDownCircle, Edit3, Trash2, ChevronDown, PlusCircle } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
-const CustomerHistory = ({ customer, history, onClose, onRefresh }) => {
+const CustomerHistory = ({ customer, history, onClose, onRefresh, onEdit }) => {
   const [activeTab, setActiveTab] = useState('ALL'); 
-  const [dateRange, setDateRange] = useState({ from: '', to: '' });
-  const [showFilters, setShowFilters] = useState(false);
   const [payAmount, setPayAmount] = useState('');
   const [payNote, setPayNote] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isPayOpen, setIsPayOpen] = useState(false);
+
+  // Use a local copy of history to enable optimistic updates
+  const [localHistory, setLocalHistory] = useState(history);
+
+  useEffect(() => {
+    setLocalHistory(history);
+  }, [history]);
 
   useEffect(() => {
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = 'auto'; };
   }, []);
 
-  const filteredHistory = history.filter(h => {
-    const matchesTab = activeTab === 'ALL' || h.type === activeTab;
-    const hDate = h.created_at.split('T')[0];
-    const matchesDate = (!dateRange.from || hDate >= dateRange.from) && (!dateRange.to || hDate <= dateRange.to);
-    return matchesTab && matchesDate;
-  });
-
-  const groups = filteredHistory.reduce((acc, h) => {
-    const date = new Date(h.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-    if (!acc[date]) acc[date] = [];
-    acc[date].push(h);
-    return acc;
-  }, {});
+  const handleDelete = async (txn) => {
+    if (!window.confirm("Delete this record permanently?")) return;
+    try {
+      // 🚀 Optimistic Delete
+      setLocalHistory(prev => prev.filter(t => t.id !== txn.id));
+      
+      const newBalance = customer.balance - txn.amount;
+      await supabase.from('customers').update({ balance: newBalance }).eq('id', customer.id);
+      await supabase.from('transactions').delete().eq('id', txn.id);
+      onRefresh(customer.id);
+    } catch (err) { alert(err.message); }
+  };
 
   const handlePayment = async () => {
-    if (!payAmount || isNaN(payAmount) || Number(payAmount) <= 0 || loading) return;
+    if (!payAmount || loading) return;
+    const amt = Number(payAmount);
+    if (amt <= 0) return alert("Enter valid amount");
+
     setLoading(true);
+
+    // 🚀 OPTIMISTIC UPDATE: Add to UI immediately
+    const optimisticTxn = {
+        id: Date.now(), // Temporary ID
+        customer_id: customer.id,
+        type: 'CREDIT',
+        amount: -amt,
+        description: payNote.trim() || "Cash Settlement",
+        created_at: new Date().toISOString()
+    };
+    
+    setLocalHistory(prev => [optimisticTxn, ...prev]);
+    setPayAmount(''); setPayNote('');
+    setIsPayOpen(false);
+
     try {
-      const amt = Number(payAmount);
       await supabase.from('customers').update({ balance: customer.balance - amt }).eq('id', customer.id);
       await supabase.from('transactions').insert([{ 
         customer_id: customer.id, 
         type: 'CREDIT', 
-        amount: amt, 
-        description: payNote || "Settlement" 
+        amount: -amt, 
+        description: optimisticTxn.description 
       }]);
-      setPayAmount(''); setPayNote('');
-      onRefresh(customer.id);
-    } catch (err) { alert(err.message); }
+      onRefresh(customer.id); // Sync back with real database IDs
+    } catch (err) { 
+        alert("Sync Error: " + err.message); 
+        onRefresh(customer.id); // Revert UI if it failed
+    }
     setLoading(false);
   };
+
+  const filtered = localHistory.filter(h => activeTab === 'ALL' || h.type === activeTab);
+  const groups = filtered.reduce((acc, h) => {
+    const d = new Date(h.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    if (!acc[d]) acc[d] = [];
+    acc[d].push(h);
+    return acc;
+  }, {});
 
   return (
     <div style={modalOverlay}>
       <div style={modalContent}>
         
-        {/* --- HEADER (Fixed visibility) --- */}
         <div style={headerArea}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={avatar}>{customer.name[0].toUpperCase()}</div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1rem', color: '#fff', textTransform: 'capitalize' }}>{customer.name}</h3>
-              <p style={{ margin: 0, color: '#ff4d4d', fontWeight: 'bold', fontSize: '0.9rem' }}>₹{customer.balance} Pending</p>
+              <h3 style={{ margin: 0, fontSize: '1rem', color: '#fff', textTransform: 'capitalize', fontWeight: '900' }}>{customer.name}</h3>
+              <p style={{ margin: 0, color: customer.balance > 0 ? '#ff4d4d' : '#4caf50', fontWeight: '900', fontSize: '0.85rem' }}>₹{customer.balance} Balance</p>
             </div>
           </div>
-          <button onClick={onClose} style={closeBtn}><X size={20} /></button>
+          <button onClick={onClose} style={closeBtn}><X size={18} /></button>
         </div>
 
-        {/* Payment Input Card */}
-        <div style={payCard}>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <div style={inputWrap}>
-              <span style={{ color: '#4caf50' }}>₹</span>
-              <input placeholder="0" type="number" value={payAmount} onChange={e => setPayAmount(e.target.value)} style={pInput}/>
+        <div style={payDropboxContainer}>
+          <div style={dropboxHeader} onClick={() => setIsPayOpen(!isPayOpen)}>
+             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <PlusCircle size={18} color={isPayOpen ? '#4caf50' : '#888'} />
+                <span style={{ color: isPayOpen ? '#4caf50' : '#eee', fontWeight: '800', fontSize: '0.85rem' }}>RECORD PAYMENT</span>
+             </div>
+             <ChevronDown size={18} color="#555" style={{ transform: isPayOpen ? 'rotate(180deg)' : 'none', transition: '0.3s' }} />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateRows: isPayOpen ? '1fr' : '0fr', transition: '0.3s ease', overflow: 'hidden' }}>
+            <div style={{ minHeight: 0 }}>
+              <div style={payCardInner}>
+                <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                  <input 
+                    placeholder="Amount" 
+                    type="number" 
+                    inputMode="decimal"
+                    value={payAmount} 
+                    onChange={e=>setPayAmount(e.target.value)} 
+                    style={amountInputStyle}
+                  />
+                  <button onClick={handlePayment} disabled={loading} style={pBtn}>
+                    {loading ? '...' : 'SAVE PAY'}
+                  </button>
+                </div>
+                <input 
+                  placeholder="Note (PhonePe, Cash...)" 
+                  value={payNote} 
+                  onChange={e=>setPayNote(e.target.value)} 
+                  style={noteIn}
+                />
+              </div>
             </div>
-            <button onClick={handlePayment} disabled={loading} style={pBtn}>
-              {loading ? '...' : 'Pay'}
+          </div>
+        </div>
+
+        <div style={tabGroup}>
+          {['ALL', 'DEBIT', 'CREDIT'].map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)} 
+              style={{ ...tBtn, color: activeTab === tab ? '#4caf50' : '#555', borderBottom: activeTab === tab ? '2px solid #4caf50' : 'none' }}>
+              {tab === 'ALL' ? 'History' : tab === 'DEBIT' ? 'Udhaar' : 'Paid'}
             </button>
-          </div>
-          <input 
-            placeholder="Add note (Cash, PhonePe...)" 
-            value={payNote} onChange={e => setPayNote(e.target.value)} 
-            style={noteIn}
-          />
+          ))}
         </div>
 
-        {/* Tab & Filter Controls */}
-        <div style={controlsRow}>
-          <div style={tabGroup}>
-            {['ALL', 'DEBIT', 'CREDIT'].map(tab => (
-              <button key={tab} onClick={() => setActiveTab(tab)} 
-                style={{ ...tBtn, color: activeTab === tab ? '#4caf50' : '#555' }}>
-                {tab === 'ALL' ? 'History' : tab === 'DEBIT' ? 'Udhaar' : 'Paid'}
-              </button>
-            ))}
-          </div>
-          <Calendar size={18} onClick={() => setShowFilters(!showFilters)} style={{ cursor: 'pointer', color: showFilters ? '#4caf50' : '#444' }} />
-        </div>
-
-        {showFilters && (
-          <div style={dateBox}>
-            <input type="date" style={dIn} onChange={e => setDateRange({...dateRange, from: e.target.value})} />
-            <input type="date" style={dIn} onChange={e => setDateRange({...dateRange, to: e.target.value})} />
-          </div>
-        )}
-
-        {/* --- SCROLLABLE LIST (Fixed scrollbar overlap) --- */}
         <div style={scrollArea}>
           {Object.entries(groups).map(([date, logs]) => (
-            <div key={date} style={{ marginBottom: '25px' }}>
-              <div style={dateHighlightContainer}>
-                <span style={datePill}>{date}</span>
-                <div style={dateLine} />
-              </div>
-
-              {logs.map(log => (
-                <div key={log.id} style={logRow}>
-                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flex: 1 }}>
-                    {log.type === 'DEBIT' ? <ArrowUpCircle color="#ff4d4d" size={18}/> : <ArrowDownCircle color="#4caf50" size={18}/>}
-                    <div style={{ flex: 1 }}>
-                      <div style={logDesc}>{log.description}</div>
-                      <div style={logTime}>{new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+            <div key={date} style={{ marginBottom: '20px' }}>
+              <div style={dateHighlightContainer}><span style={datePill}>{date}</span><div style={dateLine} /></div>
+              
+              <div style={daySectionBox}>
+                {logs.map((log, index) => (
+                  <div key={log.id} style={{
+                    ...logRow, 
+                    borderBottom: index !== logs.length - 1 ? '1px solid #1a1a1a' : 'none',
+                    paddingBottom: index !== logs.length - 1 ? '12px' : '0',
+                    marginBottom: index !== logs.length - 1 ? '12px' : '0'
+                  }}>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
+                      {log.type === 'DEBIT' ? <ArrowUpCircle color="#ff4d4d" size={18}/> : <ArrowDownCircle color="#4caf50" size={18}/>}
+                      <div style={{ flex: 1 }}>
+                        <div style={logDesc}>{log.description}</div>
+                        <div style={logTime}>{new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontWeight: '900', color: log.type === 'DEBIT' ? '#ff4d4d' : '#4caf50', marginBottom: '5px', fontSize: '0.95rem' }}>
+                        {log.type === 'DEBIT' ? '+' : '-'}₹{Math.abs(log.amount)}
+                      </div>
+                      <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                        <Edit3 size={15} color="#444" onClick={() => onEdit(log)} style={{ cursor: 'pointer' }} />
+                        <Trash2 size={15} color="#333" onClick={() => handleDelete(log)} style={{ cursor: 'pointer' }} />
+                      </div>
                     </div>
                   </div>
-                  <div style={{ fontWeight: 'bold', color: log.type === 'DEBIT' ? '#ff4d4d' : '#4caf50', marginLeft: '10px' }}>
-                    {log.type === 'DEBIT' ? '+' : '-'} ₹{log.amount}
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           ))}
-          {/* Bottom space to ensure nothing is cut off */}
-          <div style={{ height: '100px' }} />
+          <div style={{ height: '40px' }} />
         </div>
       </div>
     </div>
   );
 };
 
-// --- STYLES ---
-const modalOverlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', zIndex: 5000, display: 'flex', justifyContent: 'center', alignItems: 'flex-end' };
-
-const modalContent = { 
-  width: '100%', 
-  maxWidth: '500px', 
-  background: '#050505', 
-  height: '92vh', 
-  borderRadius: '30px 30px 0 0', 
-  display: 'flex', 
-  flexDirection: 'column', 
-  padding: '0 20px 20px 20px', // Removed top padding here to handle it in headerArea
-  borderTop: '1px solid #1a1a1a',
-  overflow: 'hidden' 
-};
-
-// Added dedicated Header area with top margin for mobile notches
-const headerArea = { 
-  display: 'flex', 
-  justifyContent: 'space-between', 
-  alignItems: 'center', 
-  paddingTop: '30px', // Extra space at the very top
-  paddingBottom: '20px',
-  background: '#050505',
-  zIndex: 10
-};
-
-const avatar = { width: '40px', height: '40px', borderRadius: '10px', background: '#111', color: '#4caf50', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold', border: '1px solid #222' };
-const closeBtn = { background: '#111', border: 'none', color: '#fff', borderRadius: '50%', padding: '8px' };
-
-const payCard = { background: '#0a0a0a', padding: '15px', borderRadius: '20px', border: '1px solid #1a1a1a', marginBottom: '20px' };
-const inputWrap = { flex: 1, background: '#000', borderRadius: '12px', padding: '0 12px', display: 'flex', alignItems: 'center', border: '1px solid #222' };
-const pInput = { background: 'none', border: 'none', color: '#fff', padding: '10px 0', width: '100%', outline: 'none', fontSize: '1rem' };
-const pBtn = { background: '#4caf50', border: 'none', borderRadius: '10px', padding: '0 15px', fontWeight: 'bold' };
-const noteIn = { background: 'none', border: 'none', borderTop: '1px solid #1a1a1a', width: '100%', marginTop: '10px', paddingTop: '10px', color: '#555', fontSize: '0.8rem', outline: 'none' };
-
-const controlsRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' };
-const tabGroup = { display: 'flex', gap: '15px' };
-const tBtn = { background: 'none', border: 'none', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer' };
-
-const dateBox = { display: 'flex', gap: '10px', background: '#111', padding: '10px', borderRadius: '12px', marginBottom: '15px' };
-const dIn = { background: 'none', border: 'none', color: '#888', fontSize: '0.75rem', outline: 'none', width: '100%' };
-
-// --- FIXED SCROLL AREA ---
-const scrollArea = { 
-  flex: 1, 
-  overflowY: 'auto', 
-  paddingRight: '15px', // Extra space so scrollbar doesn't touch text
-  marginRight: '-10px', // Pulls scrollbar closer to the edge
-  scrollbarWidth: 'thin', // For Firefox
-  WebkitOverflowScrolling: 'touch' 
-};
-
-const dateHighlightContainer = { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' };
-const datePill = { fontSize: '0.65rem', color: '#4caf50', background: 'rgba(76, 175, 80, 0.1)', padding: '4px 10px', borderRadius: '20px', fontWeight: 'bold' };
-const dateLine = { flex: 1, height: '1px', background: '#111' };
-
-const logRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' };
-const logDesc = { fontSize: '0.85rem', color: '#eee', lineHeight: '1.4' };
-const logTime = { fontSize: '0.7rem', color: '#444', marginTop: '2px' };
+// Styles remain identical to previous versions
+const modalOverlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.95)', zIndex: 5000, display: 'flex', justifyContent: 'center', alignItems: 'flex-end' };
+const modalContent = { width: '100%', maxWidth: '500px', background: '#050505', height: '92vh', borderRadius: '30px 30px 0 0', display: 'flex', flexDirection: 'column', padding: '0 16px', borderTop: '1px solid #1a1a1a', overflow: 'hidden' };
+const headerArea = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 0' };
+const avatar = { width: '38px', height: '38px', borderRadius: '10px', background: '#121212', color: '#4caf50', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: '900', border: '1px solid #222' };
+const closeBtn = { background: '#121212', border: 'none', color: '#fff', borderRadius: '50%', padding: '6px', cursor: 'pointer' };
+const payDropboxContainer = { background: '#121212', borderRadius: '20px', border: '1px solid #222', marginBottom: '15px', overflow: 'hidden' };
+const dropboxHeader = { padding: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' };
+const payCardInner = { padding: '0 15px 15px' };
+const amountInputStyle = { flex: 2.2, background: '#000', border: '1.5px solid #2a2a2a', borderRadius: '12px', padding: '10px 15px 10px 35px', color: '#fff', fontSize: '1rem', fontWeight: '900', outline: 'none', backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'14\' height=\'14\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%234caf50\' stroke-width=\'3\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3E%3Cpath d=\'M6 3h12\'/%3E%3Cpath d=\'M6 8h12\'/%3E%3Cpath d=\'m6 13 8.5 8\'/%3E%3Cpath d=\'M6 13h3\'/%3E%3Cpath d=\'M9 13c6.667 0 6.667-10 0-10\'/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: '12px center' };
+const pBtn = { flex: 1, background: '#4caf50', color: '#000', border: 'none', borderRadius: '12px', padding: '0 10px', fontWeight: '900', fontSize: '0.8rem', cursor: 'pointer' };
+const noteIn = { background: '#000', border: '1.5px solid #2a2a2a', outline: 'none', borderRadius: '10px', width: '100%', padding: '10px', color: '#eee', fontSize: '0.85rem' };
+const tabGroup = { display: 'flex', gap: '18px', marginBottom: '15px', borderBottom: '1px solid #111' };
+const tBtn = { background: 'none', border: 'none', padding: '8px 0', fontSize: '0.8rem', fontWeight: '900', cursor: 'pointer' };
+const scrollArea = { flex: 1, overflowY: 'auto', paddingRight: '4px', WebkitOverflowScrolling: 'touch' };
+const dateHighlightContainer = { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' };
+const datePill = { fontSize: '0.6rem', color: '#4caf50', background: 'rgba(76, 175, 80, 0.1)', padding: '3px 8px', borderRadius: '20px', fontWeight: '900' };
+const dateLine = { flex: 1, height: '1px', background: '#1a1a1a' };
+const daySectionBox = { background: '#121212', padding: '12px', borderRadius: '20px', border: '1px solid #222' };
+const logRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
+const logDesc = { fontSize: '0.85rem', color: '#fff', fontWeight: '600', lineHeight: '1.4' };
+const logTime = { fontSize: '0.65rem', color: '#555', fontWeight: 'bold', marginTop: '2px' };
 
 export default CustomerHistory;
