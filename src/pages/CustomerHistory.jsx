@@ -9,7 +9,6 @@ const CustomerHistory = ({ customer, history, onClose, onRefresh, onEdit }) => {
   const [loading, setLoading] = useState(false);
   const [isPayOpen, setIsPayOpen] = useState(false);
 
-  // Use a local copy of history to enable optimistic updates
   const [localHistory, setLocalHistory] = useState(history);
 
   useEffect(() => {
@@ -24,9 +23,7 @@ const CustomerHistory = ({ customer, history, onClose, onRefresh, onEdit }) => {
   const handleDelete = async (txn) => {
     if (!window.confirm("Delete this record permanently?")) return;
     try {
-      // 🚀 Optimistic Delete
       setLocalHistory(prev => prev.filter(t => t.id !== txn.id));
-      
       const newBalance = customer.balance - txn.amount;
       await supabase.from('customers').update({ balance: newBalance }).eq('id', customer.id);
       await supabase.from('transactions').delete().eq('id', txn.id);
@@ -41,9 +38,8 @@ const CustomerHistory = ({ customer, history, onClose, onRefresh, onEdit }) => {
 
     setLoading(true);
 
-    // 🚀 OPTIMISTIC UPDATE: Add to UI immediately
     const optimisticTxn = {
-        id: Date.now(), // Temporary ID
+        id: Date.now(),
         customer_id: customer.id,
         type: 'CREDIT',
         amount: -amt,
@@ -63,10 +59,10 @@ const CustomerHistory = ({ customer, history, onClose, onRefresh, onEdit }) => {
         amount: -amt, 
         description: optimisticTxn.description 
       }]);
-      onRefresh(customer.id); // Sync back with real database IDs
+      onRefresh(customer.id);
     } catch (err) { 
         alert("Sync Error: " + err.message); 
-        onRefresh(customer.id); // Revert UI if it failed
+        onRefresh(customer.id);
     }
     setLoading(false);
   };
@@ -87,8 +83,9 @@ const CustomerHistory = ({ customer, history, onClose, onRefresh, onEdit }) => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={avatar}>{customer.name[0].toUpperCase()}</div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1rem', color: '#fff', textTransform: 'capitalize', fontWeight: '900' }}>{customer.name}</h3>
-              <p style={{ margin: 0, color: customer.balance > 0 ? '#ff4d4d' : '#4caf50', fontWeight: '900', fontSize: '0.85rem' }}>₹{customer.balance} Balance</p>
+              {/* 🚀 FIXED: INCREASED FONT SIZE & WEIGHT */}
+              <h3 style={{ margin: 0, fontSize: '1.25rem', color: '#fff', textTransform: 'capitalize', fontWeight: '950' }}>{customer.name}</h3>
+              <p style={{ margin: 0, color: customer.balance > 0 ? '#ff4d4d' : '#4caf50', fontWeight: '900', fontSize: '0.95rem' }}>₹{customer.balance} Balance</p>
             </div>
           </div>
           <button onClick={onClose} style={closeBtn}><X size={18} /></button>
@@ -152,15 +149,17 @@ const CustomerHistory = ({ customer, history, onClose, onRefresh, onEdit }) => {
                     paddingBottom: index !== logs.length - 1 ? '12px' : '0',
                     marginBottom: index !== logs.length - 1 ? '12px' : '0'
                   }}>
-                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
-                      {log.type === 'DEBIT' ? <ArrowUpCircle color="#ff4d4d" size={18}/> : <ArrowDownCircle color="#4caf50" size={18}/>}
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flex: 1 }}>
+                      {log.type === 'DEBIT' ? <ArrowUpCircle color="#ff4d4d" size={20}/> : <ArrowDownCircle color="#4caf50" size={20}/>}
                       <div style={{ flex: 1 }}>
+                        {/* 🚀 FIXED: INCREASED LOG DESCRIPTION SIZE */}
                         <div style={logDesc}>{log.description}</div>
                         <div style={logTime}>{new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontWeight: '900', color: log.type === 'DEBIT' ? '#ff4d4d' : '#4caf50', marginBottom: '5px', fontSize: '0.95rem' }}>
+                      {/* 🚀 FIXED: INCREASED AMOUNT SIZE */}
+                      <div style={{ fontWeight: '950', color: log.type === 'DEBIT' ? '#ff4d4d' : '#4caf50', marginBottom: '5px', fontSize: '1rem' }}>
                         {log.type === 'DEBIT' ? '+' : '-'}₹{Math.abs(log.amount)}
                       </div>
                       <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
@@ -180,11 +179,10 @@ const CustomerHistory = ({ customer, history, onClose, onRefresh, onEdit }) => {
   );
 };
 
-// Styles remain identical to previous versions
 const modalOverlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.95)', zIndex: 5000, display: 'flex', justifyContent: 'center', alignItems: 'flex-end' };
 const modalContent = { width: '100%', maxWidth: '500px', background: '#050505', height: '92vh', borderRadius: '30px 30px 0 0', display: 'flex', flexDirection: 'column', padding: '0 16px', borderTop: '1px solid #1a1a1a', overflow: 'hidden' };
 const headerArea = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 0' };
-const avatar = { width: '38px', height: '38px', borderRadius: '10px', background: '#121212', color: '#4caf50', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: '900', border: '1px solid #222' };
+const avatar = { width: '42px', height: '42px', borderRadius: '10px', background: '#121212', color: '#4caf50', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: '900', border: '1px solid #222' };
 const closeBtn = { background: '#121212', border: 'none', color: '#fff', borderRadius: '50%', padding: '6px', cursor: 'pointer' };
 const payDropboxContainer = { background: '#121212', borderRadius: '20px', border: '1px solid #222', marginBottom: '15px', overflow: 'hidden' };
 const dropboxHeader = { padding: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' };
@@ -193,14 +191,15 @@ const amountInputStyle = { flex: 2.2, background: '#000', border: '1.5px solid #
 const pBtn = { flex: 1, background: '#4caf50', color: '#000', border: 'none', borderRadius: '12px', padding: '0 10px', fontWeight: '900', fontSize: '0.8rem', cursor: 'pointer' };
 const noteIn = { background: '#000', border: '1.5px solid #2a2a2a', outline: 'none', borderRadius: '10px', width: '100%', padding: '10px', color: '#eee', fontSize: '0.85rem' };
 const tabGroup = { display: 'flex', gap: '18px', marginBottom: '15px', borderBottom: '1px solid #111' };
-const tBtn = { background: 'none', border: 'none', padding: '8px 0', fontSize: '0.8rem', fontWeight: '900', cursor: 'pointer' };
+const tBtn = { background: 'none', border: 'none', padding: '8px 0', fontSize: '0.85rem', fontWeight: '900', cursor: 'pointer' };
 const scrollArea = { flex: 1, overflowY: 'auto', paddingRight: '4px', WebkitOverflowScrolling: 'touch' };
 const dateHighlightContainer = { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' };
-const datePill = { fontSize: '0.6rem', color: '#4caf50', background: 'rgba(76, 175, 80, 0.1)', padding: '3px 8px', borderRadius: '20px', fontWeight: '900' };
+const datePill = { fontSize: '0.65rem', color: '#4caf50', background: 'rgba(76, 175, 80, 0.1)', padding: '3px 8px', borderRadius: '20px', fontWeight: '900' };
 const dateLine = { flex: 1, height: '1px', background: '#1a1a1a' };
 const daySectionBox = { background: '#121212', padding: '12px', borderRadius: '20px', border: '1px solid #222' };
 const logRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
-const logDesc = { fontSize: '0.85rem', color: '#fff', fontWeight: '600', lineHeight: '1.4' };
-const logTime = { fontSize: '0.65rem', color: '#555', fontWeight: 'bold', marginTop: '2px' };
+// 🚀 UPDATED LOG DESCRIPTION SIZE
+const logDesc = { fontSize: '1.1rem', color: '#fff', fontWeight: '600', lineHeight: '1.4' };
+const logTime = { fontSize: '0.68rem', color: '#555', fontWeight: 'bold', marginTop: '2px' };
 
 export default CustomerHistory;

@@ -43,7 +43,8 @@ const PurchaseHistory = () => {
     const { data } = await supabase.from('purchase_bills').select('*').order('created_at', { ascending: false });
     if (data) {
       setBills([...data]);
-      setAllStores([...new Set(data.map(b => b.store_name))]);
+      const uniqueStores = [...new Set(data.map(b => b.store_name))].sort((a, b) => a.localeCompare(b));
+      setAllStores(uniqueStores);
     }
   };
 
@@ -123,6 +124,9 @@ const PurchaseHistory = () => {
     return acc;
   }, {});
 
+  // 🚀 FIXED: Guaranteed alphabetical sort for the main ledger list
+  const sortedStoreKeys = Object.keys(groupedData).sort((a, b) => a.localeCompare(b));
+
   return (
     <div style={container}>
       <style>{`
@@ -134,21 +138,13 @@ const PurchaseHistory = () => {
         .inner-wrap { position: relative; background: #1a1a1a; border-radius: 26px; z-index: 10; }
         .black-field { background: #000 !important; border: 1.5px solid #2a2a2a !important; color: #fff !important; padding: 12px; border-radius: 12px; outline: none; width: 100%; box-sizing: border-box; font-size: 0.9rem; }
         .black-field:focus { border-color: #ff9800 !important; }
-
-        /* 🚀 1. TIGHTER GAP & MORE PRICE SPACE */
         .entry-grid { display: grid; grid-template-columns: 1fr 120px 45px; gap: 6px; margin-bottom: 8px; align-items: center; }
-        
         .status-box { background: #000; border: 1.5px solid #2a2a2a; border-radius: 10px; height: 45px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
         .dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid #000; }
-        
-        /* 🚀 2. ALIGNED BOTTOM ROW & SMALLER FONT */
         .bottom-flex { display: flex; gap: 10px; align-items: center; margin-top: 20px; border-top: 1px solid #2a2a2a; padding-top: 20px; }
         .submit-btn { background: #ff9800; border: none; height: 48px; width: 55px; border-radius: 10px; cursor: pointer; color: #000; display: flex; align-items: center; justify-content: center; transition: 0.1s; flex-shrink: 0; }
         .submit-btn:active { transform: scale(0.92); }
-        
         .toast-box { position: fixed; top: 0; left: 50%; transform: translateX(-50%); background: #222; border: 1px solid #ff9800; color: #fff; padding: 12px 24px; border-radius: 12px; font-weight: bold; z-index: 9999; box-shadow: 0 10px 40px rgba(0,0,0,0.8); animation: slideIn 0.3s forwards; font-size: 0.85rem; }
-        
-        /* 🚀 3. UNIFIED STORE SECTION */
         .store-list-container { background: #1a1a1a; border-radius: 28px; border: 1px solid #333; overflow: hidden; padding: 5px 0; }
       `}</style>
 
@@ -173,7 +169,7 @@ const PurchaseHistory = () => {
                   <label style={labelStyle}>Vendor / Store</label>
                   <div style={{position: 'relative'}}><Store size={14} color="#ff9800" style={iconLeft}/><input placeholder="Search or type store..." value={storeName} onFocus={() => setShowSuggestions(true)} onChange={e => setStoreName(e.target.value)} className="black-field" style={{paddingLeft: '35px'}}/></div>
                   {showSuggestions && storeName && (
-                    <div style={suggestionBox}>{allStores.filter(s => s.includes(storeName.toLowerCase())).map(s => (<div key={s} onClick={() => {setStoreName(s); setShowSuggestions(false);}} style={suggestionItem}>{s}</div>))}</div>
+                    <div style={suggestionBox}>{allStores.filter(s => s.toLowerCase().includes(storeName.toLowerCase())).map(s => (<div key={s} onClick={() => {setStoreName(s); setShowSuggestions(false);}} style={suggestionItem}>{s}</div>))}</div>
                   )}
                 </div>
 
@@ -205,10 +201,9 @@ const PurchaseHistory = () => {
       </div>
 
       <h3 style={labelStyle}>Store Ledger</h3>
-      {/* 🚀 3. WRAPPED IN ONE SECTION */}
       <div className="store-list-container">
-        {Object.keys(groupedData).map((store, index) => (
-          <div key={store} style={{...storeAccordion, marginBottom: 0, border: 'none', borderRadius: 0, borderBottom: index !== Object.keys(groupedData).length - 1 ? '1px solid #222' : 'none'}}>
+        {sortedStoreKeys.map((store, index) => (
+          <div key={store} style={{...storeAccordion, marginBottom: 0, border: 'none', borderRadius: 0, borderBottom: index !== sortedStoreKeys.length - 1 ? '1px solid #222' : 'none'}}>
             <div style={storeHeader} onClick={() => {setExpandedStore(expandedStore === store ? null : store); setExpandedDate(null);}}>
               <div style={{display: 'flex', alignItems: 'center', gap: '12px', flex: 1}}><div style={avatar}>{store[0].toUpperCase()}</div><span style={storeNameTitle}>{store}</span></div>
               <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
@@ -230,31 +225,32 @@ const PurchaseHistory = () => {
                     <div key={date} style={dateWrapper}>
                       <div style={dateHeader} onClick={() => fetchBillDetailsForDate(store, date)}>
                         <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}><Calendar size={12} color="#ff9800" /><span style={dateText}>{date}</span></div>
-                        <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}><span style={{color: '#fff', fontWeight: '950', fontSize: '1rem'}}>₹{groupedData[store].dates[date].total}</span>{isSelected ? <X size={14} color="#ff4d4d" /> : <ChevronRight size={14} color="#444" />}</div>
+                        <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}><span style={{color: '#fff', fontWeight: '950', fontSize: '1.1rem'}}>₹{groupedData[store].dates[date].total}</span>{isSelected ? <X size={14} color="#ff4d4d" /> : <ChevronRight size={14} color="#444" />}</div>
                       </div>
                       {isSelected && (
                         <div style={{padding: '10px 0 20px'}}>{billDetails.map((bill) => (
-                          <div key={bill.id} style={{...billCard, borderLeft: bill.total_amount === 0 ? '4px solid #4caf50' : '1px solid #2a2a2a'}}>
+                          <div key={bill.id} style={{...billCard, borderLeft: bill.total_amount === 0 ? '4px solid #4caf50' : '1px solid #222'}}>
                             <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '15px'}}><div style={billTimeHeader}><Clock size={10} /> {new Date(bill.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div><Edit3 size={14} color="#444" onClick={() => handleEdit(bill)} style={{cursor:'pointer'}} /></div>
                             {bill.total_amount === 0 ? (
-                                 <div style={settlementBox}><div style={{display:'flex', alignItems:'center', gap:'8px'}}><Wallet size={14} color="#4caf50"/><span style={{color: '#4caf50', fontWeight: 'bold', fontSize: '0.85rem'}}>{bill.description || 'Settlement'}</span></div><span style={{color: '#fff', fontWeight: '950', fontSize: '1rem'}}>₹{bill.amount_paid}</span></div>
+                                 <div style={settlementBox}><div style={{display:'flex', alignItems:'center', gap:'8px'}}><Wallet size={14} color="#4caf50"/><span style={{color: '#4caf50', fontWeight: 'bold', fontSize: '1.1rem'}}>{bill.description || 'Settlement'}</span></div><span style={{color: '#fff', fontWeight: '950', fontSize: '1.2rem'}}>₹{bill.amount_paid}</span></div>
                               ) : (
                                 <>
                                   <div style={{marginBottom: '15px'}}>{bill.items.map((item, i) => (
-                                    <div key={i} style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px'}}>
+                                    <div key={i} style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px'}}>
                                       <div className="dot" style={{ background: item.is_paid ? '#4caf50' : '#ffeb3b', width: '8px', height: '8px' }} />
-                                      <span style={{flex: 1, color: '#eee', fontSize: '0.9rem', fontWeight: '600'}}>{item.item_name}</span>
-                                      <span style={{color: '#fff', fontWeight: '900', fontSize: '0.9rem'}}>₹{item.price}</span>
+                                      {/* 🚀 FIXED: Larger Item & Price fonts */}
+                                      <span style={{flex: 1, color: '#eee', fontSize: '1.1rem', fontWeight: '600'}}>{item.item_name}</span>
+                                      <span style={{color: '#fff', fontWeight: '900', fontSize: '1.1rem'}}>₹{item.price}</span>
                                     </div>
                                   ))}</div>
                                   <div style={finalSummaryBox}>
-                                    <div style={summaryRow}><span style={summaryLabel}>Bill Total</span><span style={summaryValue}>₹{bill.total_amount}</span></div>
-                                    <div style={summaryRow}><span style={{...summaryLabel, color: '#4caf50'}}>Paid</span><span style={{...summaryValue, color: '#4caf50'}}>₹{bill.amount_paid}</span></div>
+                                    <div style={summaryRow}><span style={summaryLabel}>Bill Total</span><span style={{...summaryValue, fontSize: '1.1rem'}}>₹{bill.total_amount}</span></div>
+                                    <div style={summaryRow}><span style={summaryLabel}>Paid</span><span style={{...summaryValue, color: '#4caf50', fontSize: '1.1rem'}}>₹{bill.amount_paid}</span></div>
                                     <div style={summaryRow}>
                                       <span style={{...summaryLabel, color: (bill.total_amount - bill.amount_paid) === 0 ? '#4caf50' : '#ff4d4d'}}>
                                         {(bill.total_amount - bill.amount_paid) === 0 ? 'STATUS' : 'DUE'}
                                       </span>
-                                      <span style={{...summaryValue, color: (bill.total_amount - bill.amount_paid) === 0 ? '#4caf50' : '#ff4d4d'}}>
+                                      <span style={{...summaryValue, color: (bill.total_amount - bill.amount_paid) === 0 ? '#4caf50' : '#ff4d4d', fontSize: '1.1rem'}}>
                                         {(bill.total_amount - bill.amount_paid) === 0 ? 'CLEARED' : `₹${bill.total_amount - bill.amount_paid}`}
                                       </span>
                                     </div>
@@ -289,8 +285,9 @@ const suggestionBox = { position: 'absolute', top: '100%', left: 0, right: 0, ba
 const suggestionItem = { padding: '12px', color: '#ff9800', borderBottom: '1px solid #222', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' };
 const storeAccordion = { background: 'transparent' };
 const storeHeader = { padding: '18px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' };
-const avatar = { width: '36px', height: '36px', background: '#000', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#ff9800', fontWeight: '950', border: '1.5px solid #333' };
-const storeNameTitle = { color: '#fff', fontSize: '1rem', textTransform: 'capitalize', fontWeight: '950' };
+const avatar = { width: '40px', height: '40px', background: '#000', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#ff9800', fontWeight: '950', border: '1.5px solid #333' };
+// 🚀 FIXED: Larger Store Name Title (1.2rem)
+const storeNameTitle = { color: '#fff', fontSize: '1.2rem', textTransform: 'capitalize', fontWeight: '950' };
 const statsBadge = { display: 'flex', gap: '10px', background: '#000', padding: '6px 12px', borderRadius: '10px', border: '1px solid #222' };
 const statsLabel = { margin: 0, fontSize: '0.5rem', color: '#666', fontWeight: '950' };
 const dateListContainer = { background: '#0a0a0a', padding: '0 20px 15px' };
@@ -302,7 +299,7 @@ const billTimeHeader = { fontSize: '0.6rem', color: '#444', display: 'flex', ali
 const settlementBox = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', background: 'rgba(76, 175, 80, 0.05)', borderRadius: '12px', border: '1px solid rgba(76, 175, 80, 0.1)' };
 const finalSummaryBox = { background: '#080808', padding: '12px', borderRadius: '12px', border: '1.5px solid #1a1a1a', marginTop: '5px' };
 const summaryRow = { display: 'flex', justifyContent: 'space-between', marginBottom: '6px' };
-const summaryLabel = { fontSize: '0.7rem', color: '#555', fontWeight: '900' };
-const summaryValue = { fontSize: '0.9rem', fontWeight: '950', color: '#fff' };
+const summaryLabel = { fontSize: '0.75rem', color: '#555', fontWeight: '900' };
+const summaryValue = { fontSize: '1rem', fontWeight: '950', color: '#fff' };
 
 export default PurchaseHistory;
