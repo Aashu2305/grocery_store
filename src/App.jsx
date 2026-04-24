@@ -66,7 +66,12 @@ const Home = () => {
   const [alerts, setAlerts] = useState([]);
   const [stats, setStats] = useState({ totalUdhaar: 0, topDebtors: [] });
   const [showDebtors, setShowDebtors] = useState(false);
-  const [isAmountHidden, setIsAmountHidden] = useState(false); 
+  
+  // 🚀 PERSISTENT PRIVACY STATE
+  const [isAmountHidden, setIsAmountHidden] = useState(() => {
+    return localStorage.getItem('udhaar_hidden') === 'true';
+  }); 
+
   const navigate = useNavigate();
 
   const getGreeting = () => {
@@ -76,14 +81,19 @@ const Home = () => {
     return "Good Evening";
   };
 
+  // Toggle and Save Privacy setting
+  const togglePrivacy = (e) => {
+    e.stopPropagation();
+    const newState = !isAmountHidden;
+    setIsAmountHidden(newState);
+    localStorage.setItem('udhaar_hidden', newState);
+  };
+
   useEffect(() => { 
-    // 🚀 1. LOAD INSTANTLY FROM MASTER JSON
     const cachedRaw = localStorage.getItem('master_khata_db');
     if (cachedRaw) {
       try {
         const parsed = JSON.parse(cachedRaw);
-        
-        // 🛡️ Bulletproof extraction: handles both array and object formats
         let customerList = [];
         if (Array.isArray(parsed)) {
           customerList = parsed;
@@ -126,7 +136,6 @@ const Home = () => {
           topDebtors: customerData.filter(c => c.balance > 0) 
         });
         
-        // 🚀 2. SYNC BACK TO MASTER JSON
         const cachedRaw = localStorage.getItem('master_khata_db');
         let currentDb = { customers: [], history: {} };
         if (cachedRaw) {
@@ -178,7 +187,7 @@ const Home = () => {
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <p style={{...cardLabel, color: '#ffc107', fontSize: '0.8rem'}}> TOTAL UDHAAR</p>
-              <button onClick={(e) => { e.stopPropagation(); setIsAmountHidden(!isAmountHidden); }} style={privacyBtn}>
+              <button onClick={togglePrivacy} style={privacyBtn}>
                 {isAmountHidden ? <EyeOff size={18} color="#7c2a2a" /> : <Eye size={18} color="#e5f553" />}
               </button>
             </div>
@@ -207,14 +216,15 @@ const Home = () => {
 
       <h3 style={sectionLabel}>Quick Tools</h3>
       <div style={bentoGrid}>
-        <Link to="/khata" style={{...bentoTile, gridColumn: 'span 2', background: '#111', padding: '22px 24px', flexDirection: 'row', alignItems: 'center'}}>
-          <div style={{...tileIcon, background: 'rgba(76, 175, 80, 0.15)', width: '46px', height: '46px'}}><BookOpen color="#4caf50" size={24} /></div>
-          <div style={{flex: 1, marginLeft: '16px'}}>
-            <h4 style={{...tileTitle, fontSize: '1.2rem'}}>Daily Khata</h4>
-            <p style={{...tileSub, color: '#888', fontSize: '0.9rem', fontWeight: '700'}}>Ledger & Customer Udhari</p>
+        <Link to="/khata" style={{...bentoTile, gridColumn: 'span 2', background: '#111', padding: '30px 24px', flexDirection: 'row', alignItems: 'center', minHeight: '110px'}}>
+          <div style={{...tileIcon, background: 'rgba(76, 175, 80, 0.15)', width: '54px', height: '54px'}}><BookOpen color="#4caf50" size={30} /></div>
+          <div style={{flex: 1, marginLeft: '20px'}}>
+            <h4 style={{...tileTitle, fontSize: '1.4rem'}}>Daily Khata</h4>
+            <p style={{...tileSub, color: '#888', fontSize: '0.95rem', fontWeight: '700'}}>Ledger & Customer Udhari</p>
           </div>
-          <ChevronRight size={22} color="#4caf50" />
+          <ChevronRight size={26} color="#4caf50" />
         </Link>
+        
         <Link to="/purchases" style={bentoTile}>
           <div style={{...tileIcon, background: 'rgba(255, 152, 0, 0.15)'}}><ShoppingBag color="#ff9800" size={24} /></div>
           <div>
@@ -293,7 +303,8 @@ const loginIcon = { position: 'absolute', left: '15px' };
 const loginInput = { width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid #222', padding: '15px 15px 15px 45px', borderRadius: '16px', color: '#fff', fontSize: '1rem', outline: 'none' };
 const loginBtn = { background: '#4caf50', color: '#000', border: 'none', padding: '16px', borderRadius: '16px', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px', boxShadow: '0 10px 20px rgba(76, 175, 80, 0.2)' };
 const errorText = { color: '#ff4d4d', fontSize: '0.85rem', margin: '5px 0' };
-const homeContainer = { maxWidth: '500px', margin: '0 auto', padding: '24px', paddingBottom: '130px', fontFamily: 'system-ui, sans-serif' };
+
+const homeContainer = { maxWidth: '500px', margin: '0 auto', padding: '50px 24px', paddingBottom: '130px', fontFamily: 'system-ui, sans-serif' };
 const headerStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
 const greetingText = { margin: 0, color: '#666', fontSize: '0.9rem', fontWeight: '500' };
 const welcomeText = { margin: 0, fontSize: '1.8rem', fontWeight: '900', color: '#fff', letterSpacing: '-0.5px' };
