@@ -10,11 +10,15 @@ createRoot(document.getElementById('root')).render(
 )
 
 // ⚡ OFFLINE MODE: Register Service Worker
-// This allows the app to load even when there is no Wi-Fi
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then(reg => console.log('🚀 Offline Mode Ready: SW Registered!'))
-      .catch(err => console.log('❌ SW Registration Failed:', err));
+    // 🚀 Fixed the path to use the root slash correctly for Vercel
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then(reg => {
+        console.log('🚀 Offline Mode Ready: SW Registered!');
+      })
+      .catch(err => {
+        console.log('❌ SW Registration Failed:', err);
+      });
   });
 }
