@@ -5,7 +5,11 @@
       "destination": "/sw.js"
     },
     {
-      "source": "/(.*)",
+      "source": "/assets/(.*)",
+      "destination": "/assets/$1"
+    },
+    {
+      "source": "/((?!api|assets|sw.js|manifest.json|vite.png).*)",
       "destination": "/index.html"
     }
   ]
