@@ -67,7 +67,6 @@ const Home = () => {
   const [stats, setStats] = useState({ totalUdhaar: 0, topDebtors: [] });
   const [showDebtors, setShowDebtors] = useState(false);
   
-  // 🚀 PERSISTENT PRIVACY STATE
   const [isAmountHidden, setIsAmountHidden] = useState(() => {
     return localStorage.getItem('udhaar_hidden') === 'true';
   }); 
@@ -81,7 +80,6 @@ const Home = () => {
     return "Good Evening";
   };
 
-  // Toggle and Save Privacy setting
   const togglePrivacy = (e) => {
     e.stopPropagation();
     const newState = !isAmountHidden;
@@ -90,17 +88,14 @@ const Home = () => {
   };
 
   useEffect(() => { 
-    const cachedRaw = localStorage.getItem('master_khata_db');
-    if (cachedRaw) {
+    // 🚀 LOAD INITIAL DATA FROM ALL CACHES IMMEDIATELY
+    const cachedKhata = localStorage.getItem('master_khata_db');
+    const cachedInventory = localStorage.getItem('master_inventory_db');
+
+    if (cachedKhata) {
       try {
-        const parsed = JSON.parse(cachedRaw);
-        let customerList = [];
-        if (Array.isArray(parsed)) {
-          customerList = parsed;
-        } else if (parsed && Array.isArray(parsed.customers)) {
-          customerList = parsed.customers;
-        }
-        
+        const parsed = JSON.parse(cachedKhata);
+        const customerList = Array.isArray(parsed) ? parsed : (parsed.customers || []);
         if (customerList.length > 0) {
           const total = customerList.reduce((sum, c) => sum + (Number(c.balance) || 0), 0);
           setStats({ 
@@ -108,26 +103,37 @@ const Home = () => {
             topDebtors: customerList.filter(c => c.balance > 0).sort((a, b) => b.balance - a.balance) 
           });
         }
-      } catch (e) {
-        console.error("Cache corrupted, clearing...");
-        localStorage.removeItem('master_khata_db');
-      }
+      } catch (e) { console.error("Khata cache error"); }
     }
 
-    fetchDashboardData(); 
-    window.addEventListener('focus', fetchDashboardData);
-    return () => window.removeEventListener('focus', fetchDashboardData);
+    if (cachedInventory) {
+      try {
+        const stockData = JSON.parse(cachedInventory);
+        const needsPurchase = stockData.filter(item => item.is_bought === false); 
+        setEmptyCount(needsPurchase.length);
+        setAlerts(needsPurchase.slice(0, 3).map(i => i.name));
+      } catch (e) { console.error("Stock cache error"); }
+    }
+
+    // 🚀 ONLY FETCH IF DATA IS MISSING OR ONCE PER SESSION
+    if (!cachedKhata || !cachedInventory || !window.hasFetchedToday) {
+      fetchDashboardData();
+      window.hasFetchedToday = true; // Prevents re-fetch when clicking tabs
+    }
   }, []);
 
   async function fetchDashboardData() {
     try {
+      // 1. Fetch Inventory Sync
       const { data: stockData } = await supabase.from('inventory').select('*');
       if (stockData) {
         const needsPurchase = stockData.filter(item => item.is_bought === false); 
         setEmptyCount(needsPurchase.length);
         setAlerts(needsPurchase.slice(0, 3).map(i => i.name));
+        localStorage.setItem('master_inventory_db', JSON.stringify(stockData));
       }
 
+      // 2. Fetch Khata Sync
       const { data: customerData } = await supabase.from('customers').select('*').order('balance', { ascending: false });
       if (customerData) {
         const total = customerData.reduce((sum, c) => sum + (Number(c.balance) || 0), 0);
@@ -148,7 +154,7 @@ const Home = () => {
         localStorage.setItem('master_khata_db', JSON.stringify(currentDb));
       }
     } catch (err) { 
-      console.error("Sync Error", err); 
+      console.error("Dashboard Sync Error", err); 
     }
   }
 
@@ -172,7 +178,6 @@ const Home = () => {
         <div style={profileCircle}><User color="#4caf50" size={28} /></div>
       </header>
 
-      {/* --- UDHAAR PULSE CARD --- */}
       <section 
         onClick={() => setShowDebtors(!showDebtors)} 
         className="aura-card"

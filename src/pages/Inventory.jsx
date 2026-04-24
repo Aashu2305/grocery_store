@@ -8,8 +8,17 @@ const Inventory = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState({ show: false, msg: '' });
 
+  // 🚀 1. LOAD FROM CACHE ON BOOT
   useEffect(() => {
-    fetchInventory();
+    const cachedData = localStorage.getItem('master_inventory_db');
+    if (cachedData) {
+      try {
+        setItems(JSON.parse(cachedData));
+      } catch (e) {
+        console.error("Inventory cache corrupted");
+      }
+    }
+    fetchInventory(); // Refresh in background
   }, []);
 
   const showToast = (msg) => {
@@ -17,9 +26,17 @@ const Inventory = () => {
     setTimeout(() => setToast({ show: false, msg: '' }), 3000);
   };
 
+  // 🚀 2. SYNC & CACHE LOGIC
   const fetchInventory = async () => {
-    const { data } = await supabase.from('inventory').select('*').order('created_at', { ascending: false });
-    if (data) setItems(data);
+    try {
+      const { data, error } = await supabase.from('inventory').select('*').order('created_at', { ascending: false });
+      if (data) {
+        setItems(data);
+        localStorage.setItem('master_inventory_db', JSON.stringify(data));
+      }
+    } catch (err) {
+      console.log("Offline: Using cached inventory");
+    }
   };
 
   const addInputRow = () => setInputRows([...inputRows, '']);
@@ -38,51 +55,55 @@ const Inventory = () => {
     if (validNames.length === 0 || isSaving) return;
     setIsSaving(true);
     
-    // Create new items for local state update
     const newItems = validNames.map(name => ({ 
-      id: Date.now() + Math.random(), // Temporary ID
+      id: Date.now() + Math.random(), 
       name: name.toLowerCase().trim(), 
-      is_bought: false 
+      is_bought: false,
+      created_at: new Date().toISOString()
     }));
 
-    // 🚀 OPTIMISTIC UPDATE: Add to UI immediately
-    setItems(prev => [...newItems, ...prev]);
+    // 🚀 OPTIMISTIC UPDATE
+    const updatedItems = [...newItems, ...items];
+    setItems(updatedItems);
+    localStorage.setItem('master_inventory_db', JSON.stringify(updatedItems));
     setInputRows(['']);
 
     try {
       const payload = validNames.map(name => ({ name: name.toLowerCase().trim(), is_bought: false }));
       await supabase.from('inventory').insert(payload);
       showToast("Inventory Updated!");
-      fetchInventory(); // Final sync with DB IDs
+      fetchInventory(); 
     } catch (err) { 
-      alert(err.message); 
-      fetchInventory(); // Rollback if error
+      console.log("Sync error, kept local copy");
+      fetchInventory(); 
     } finally { setIsSaving(false); }
   };
 
   const toggleBought = async (item) => {
-    // 🚀 OPTIMISTIC UPDATE: Toggle UI immediately
-    setItems(prev => prev.map(i => i.id === item.id ? { ...i, is_bought: !i.is_bought } : i));
+    // 🚀 OPTIMISTIC UPDATE
+    const updatedItems = items.map(i => i.id === item.id ? { ...i, is_bought: !i.is_bought } : i);
+    setItems(updatedItems);
+    localStorage.setItem('master_inventory_db', JSON.stringify(updatedItems));
 
     try {
       const { error } = await supabase.from('inventory').update({ is_bought: !item.is_bought }).eq('id', item.id);
       if (error) throw error;
     } catch (err) {
-      alert("Sync failed! Rolling back.");
-      fetchInventory(); // Rollback to actual DB state
+      fetchInventory(); 
     }
   };
 
   const deleteItem = async (id) => {
-    // 🚀 OPTIMISTIC UPDATE: Remove from UI immediately
-    setItems(prev => prev.filter(i => i.id !== id));
+    // 🚀 OPTIMISTIC UPDATE
+    const updatedItems = items.filter(i => i.id !== id);
+    setItems(updatedItems);
+    localStorage.setItem('master_inventory_db', JSON.stringify(updatedItems));
 
     try {
       const { error } = await supabase.from('inventory').delete().eq('id', id);
       if (error) throw error;
     } catch (err) {
-      alert("Delete failed!");
-      fetchInventory(); // Rollback
+      fetchInventory(); 
     }
   };
 

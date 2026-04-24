@@ -25,8 +25,19 @@ const PurchaseHistory = () => {
 
   const suggestionRef = useRef(null);
 
+  // 🚀 1. LOAD FROM MASTER BILLS JSON ON BOOT
   useEffect(() => {
-    fetchBills();
+    const cachedRaw = localStorage.getItem('master_bills_db');
+    if (cachedRaw) {
+      try {
+        const parsed = JSON.parse(cachedRaw);
+        const billList = parsed.bills || [];
+        setBills(billList);
+        setAllStores([...new Set(billList.map(b => b.store_name))].sort((a, b) => a.localeCompare(b)));
+      } catch (e) { console.error("Bills cache corrupted"); }
+    }
+    fetchBills(); // Refresh & Bulk Sync in background
+    
     const handleClickOutside = (e) => {
       if (suggestionRef.current && !suggestionRef.current.contains(e.target)) setShowSuggestions(false);
     };
@@ -39,12 +50,44 @@ const PurchaseHistory = () => {
     setTimeout(() => setToast({ show: false, msg: '' }), 3500);
   };
 
+  // Helper to maintain Master Bills structure (bills + items map)
+  const updateBillsCache = (billsData, itemsUpdate = null) => {
+    const cachedRaw = localStorage.getItem('master_bills_db');
+    let currentDb = { bills: [], items: {} };
+    if (cachedRaw) {
+      try {
+        currentDb = JSON.parse(cachedRaw);
+      } catch (e) {}
+    }
+    if (billsData) currentDb.bills = billsData;
+    if (itemsUpdate) currentDb.items = { ...currentDb.items, ...itemsUpdate };
+    localStorage.setItem('master_bills_db', JSON.stringify(currentDb));
+  };
+
+  // 🚀 2. BULK SYNC: DOWNLOAD ALL BILLS & ITEMS FOR OFFLINE
   const fetchBills = async () => {
-    const { data } = await supabase.from('purchase_bills').select('*').order('created_at', { ascending: false });
-    if (data) {
-      setBills([...data]);
-      const uniqueStores = [...new Set(data.map(b => b.store_name))].sort((a, b) => a.localeCompare(b));
-      setAllStores(uniqueStores);
+    try {
+      const [billsRes, itemsRes] = await Promise.all([
+        supabase.from('purchase_bills').select('*').order('created_at', { ascending: false }),
+        supabase.from('purchase_items').select('*')
+      ]);
+
+      if (billsRes.data) {
+        setBills(billsRes.data);
+        setAllStores([...new Set(billsRes.data.map(b => b.store_name))].sort((a, b) => a.localeCompare(b)));
+        
+        // Map items to bill IDs
+        const itemsMap = {};
+        if (itemsRes.data) {
+          itemsRes.data.forEach(item => {
+            if (!itemsMap[item.bill_id]) itemsMap[item.bill_id] = [];
+            itemsMap[item.bill_id].push(item);
+          });
+        }
+        updateBillsCache(billsRes.data, itemsMap);
+      }
+    } catch (err) {
+      console.log("Offline: Using cached bills");
     }
   };
 
@@ -53,11 +96,24 @@ const PurchaseHistory = () => {
     setStoreName(bill.store_name);
     setTotalPaid(bill.amount_paid);
     setDescription(bill.description || '');
-    const { data: pItems } = await supabase.from('purchase_items').select('*').eq('bill_id', bill.id);
-    setItems(pItems?.length > 0 
-      ? pItems.map(i => ({ name: i.item_name, price: i.price, is_paid: i.is_paid })) 
-      : [{ name: '', price: '', is_paid: true }]
-    );
+    
+    // Check cache first for items
+    const cachedRaw = localStorage.getItem('master_bills_db');
+    let existingItems = null;
+    if (cachedRaw) {
+      const parsed = JSON.parse(cachedRaw);
+      if (parsed.items && parsed.items[bill.id]) existingItems = parsed.items[bill.id];
+    }
+
+    if (existingItems) {
+      setItems(existingItems.map(i => ({ name: i.item_name, price: i.price, is_paid: i.is_paid })));
+    } else {
+      const { data: pItems } = await supabase.from('purchase_items').select('*').eq('bill_id', bill.id);
+      setItems(pItems?.length > 0 
+        ? pItems.map(i => ({ name: i.item_name, price: i.price, is_paid: i.is_paid })) 
+        : [{ name: '', price: '', is_paid: true }]
+      );
+    }
     setIsEntryOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -108,10 +164,29 @@ const PurchaseHistory = () => {
   const fetchBillDetailsForDate = async (store, dateStr) => {
     const key = `${store}-${dateStr}`;
     if (expandedDate === key) return setExpandedDate(null);
+    
     const billsOnDate = bills.filter(b => b.store_name === store && new Date(b.created_at).toLocaleDateString() === dateStr);
-    const { data } = await supabase.from('purchase_items').select('*').in('bill_id', billsOnDate.map(b => b.id));
-    setBillDetails(billsOnDate.map(b => ({ ...b, items: data?.filter(item => item.bill_id === b.id) || [] })));
+    
+    // Try cache first
+    const cachedRaw = localStorage.getItem('master_bills_db');
+    if (cachedRaw) {
+      const parsed = JSON.parse(cachedRaw);
+      const combined = billsOnDate.map(b => ({ ...b, items: parsed.items[b.id] || [] }));
+      setBillDetails(combined);
+    }
     setExpandedDate(key);
+
+    // Sync in background
+    try {
+      const { data } = await supabase.from('purchase_items').select('*').in('bill_id', billsOnDate.map(b => b.id));
+      if (data) {
+        const combined = billsOnDate.map(b => ({ ...b, items: data.filter(item => item.bill_id === b.id) }));
+        setBillDetails(combined);
+        const newItemsMap = {};
+        billsOnDate.forEach(b => { newItemsMap[b.id] = data.filter(item => item.bill_id === b.id); });
+        updateBillsCache(null, newItemsMap);
+      }
+    } catch (err) {}
   };
 
   const groupedData = bills.reduce((acc, bill) => {
@@ -124,7 +199,6 @@ const PurchaseHistory = () => {
     return acc;
   }, {});
 
-  // 🚀 FIXED: Guaranteed alphabetical sort for the main ledger list
   const sortedStoreKeys = Object.keys(groupedData).sort((a, b) => a.localeCompare(b));
 
   return (
@@ -134,7 +208,6 @@ const PurchaseHistory = () => {
         @keyframes slideIn { from { transform: translate(-50%, -100%); } to { transform: translate(-50%, 20px); } }
         .tracer-box { position: relative; border-radius: 28px; padding: 2px; background: #222; overflow: hidden; margin-bottom: 25px; }
         .tracer-box::before { content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: conic-gradient(transparent, transparent, transparent, #ff9800); animation: tracer 5s linear infinite; display: ${isEntryOpen ? 'none' : 'block'}; }
-        
         .inner-wrap { position: relative; background: #1a1a1a; border-radius: 26px; z-index: 10; }
         .black-field { background: #000 !important; border: 1.5px solid #2a2a2a !important; color: #fff !important; padding: 12px; border-radius: 12px; outline: none; width: 100%; box-sizing: border-box; font-size: 0.9rem; }
         .black-field:focus { border-color: #ff9800 !important; }
@@ -143,8 +216,7 @@ const PurchaseHistory = () => {
         .dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid #000; }
         .bottom-flex { display: flex; gap: 10px; align-items: center; margin-top: 20px; border-top: 1px solid #2a2a2a; padding-top: 20px; }
         .submit-btn { background: #ff9800; border: none; height: 48px; width: 55px; border-radius: 10px; cursor: pointer; color: #000; display: flex; align-items: center; justify-content: center; transition: 0.1s; flex-shrink: 0; }
-        .submit-btn:active { transform: scale(0.92); }
-        .toast-box { position: fixed; top: 0; left: 50%; transform: translateX(-50%); background: #222; border: 1px solid #ff9800; color: #fff; padding: 12px 24px; border-radius: 12px; font-weight: bold; z-index: 9999; box-shadow: 0 10px 40px rgba(0,0,0,0.8); animation: slideIn 0.3s forwards; font-size: 0.85rem; }
+        .toast-box { position: fixed; top: 0; left: 50%; transform: translateX(-50%); background: #222; border: 1px solid #ff9800; color: #fff; padding: 12px 24px; border-radius: 12px; font-weight: bold; z-index: 9999; animation: slideIn 0.3s forwards; font-size: 0.85rem; }
         .store-list-container { background: #1a1a1a; border-radius: 28px; border: 1px solid #333; overflow: hidden; padding: 5px 0; }
       `}</style>
 
@@ -203,7 +275,7 @@ const PurchaseHistory = () => {
       <h3 style={labelStyle}>Store Ledger</h3>
       <div className="store-list-container">
         {sortedStoreKeys.map((store, index) => (
-          <div key={store} style={{...storeAccordion, marginBottom: 0, border: 'none', borderRadius: 0, borderBottom: index !== sortedStoreKeys.length - 1 ? '1px solid #222' : 'none'}}>
+          <div key={store} style={{...storeAccordion, borderBottom: index !== sortedStoreKeys.length - 1 ? '1px solid #222' : 'none'}}>
             <div style={storeHeader} onClick={() => {setExpandedStore(expandedStore === store ? null : store); setExpandedDate(null);}}>
               <div style={{display: 'flex', alignItems: 'center', gap: '12px', flex: 1}}><div style={avatar}>{store[0].toUpperCase()}</div><span style={storeNameTitle}>{store}</span></div>
               <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
@@ -238,7 +310,6 @@ const PurchaseHistory = () => {
                                   <div style={{marginBottom: '15px'}}>{bill.items.map((item, i) => (
                                     <div key={i} style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px'}}>
                                       <div className="dot" style={{ background: item.is_paid ? '#4caf50' : '#ffeb3b', width: '8px', height: '8px' }} />
-                                      {/* 🚀 FIXED: Larger Item & Price fonts */}
                                       <span style={{flex: 1, color: '#eee', fontSize: '1.1rem', fontWeight: '600'}}>{item.item_name}</span>
                                       <span style={{color: '#fff', fontWeight: '900', fontSize: '1.1rem'}}>₹{item.price}</span>
                                     </div>
@@ -286,7 +357,6 @@ const suggestionItem = { padding: '12px', color: '#ff9800', borderBottom: '1px s
 const storeAccordion = { background: 'transparent' };
 const storeHeader = { padding: '18px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' };
 const avatar = { width: '40px', height: '40px', background: '#000', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#ff9800', fontWeight: '950', border: '1.5px solid #333' };
-// 🚀 FIXED: Larger Store Name Title (1.2rem)
 const storeNameTitle = { color: '#fff', fontSize: '1.2rem', textTransform: 'capitalize', fontWeight: '950' };
 const statsBadge = { display: 'flex', gap: '10px', background: '#000', padding: '6px 12px', borderRadius: '10px', border: '1px solid #222' };
 const statsLabel = { margin: 0, fontSize: '0.5rem', color: '#666', fontWeight: '950' };

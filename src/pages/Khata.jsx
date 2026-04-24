@@ -27,14 +27,12 @@ const Khata = () => {
 
   const suggestionRef = useRef(null);
 
-  // 🚀 1. LOAD FROM MASTER JSON ON BOOT
   useEffect(() => {
     const cachedRaw = localStorage.getItem('master_khata_db');
     if (cachedRaw) {
       try {
         const parsed = JSON.parse(cachedRaw);
         const customerList = Array.isArray(parsed) ? parsed : (parsed.customers || []);
-        // FIXED: Sort cached data immediately
         setCustomers(customerList.sort((a, b) => a.name.localeCompare(b.name)));
       } catch (e) { console.error("Cache corrupted"); }
     }
@@ -66,18 +64,16 @@ const Khata = () => {
     localStorage.setItem('master_khata_db', JSON.stringify(currentDb));
   };
 
-  // 🚀 2. BULK SYNC & AUTO-SORT
   const fetchCustomers = async () => {
     try {
       const { data } = await supabase.from('customers').select('*').order('name');
       if (data) {
-        // FIXED: Ensure state is sorted
         const sortedData = data.sort((a, b) => a.name.localeCompare(b.name));
         setCustomers(sortedData);
         updateMasterCache(sortedData);
       }
     } catch (err) {
-      console.log("Offline: Using local Master JSON");
+      console.log("Offline Mode");
     }
   };
 
@@ -126,9 +122,10 @@ const Khata = () => {
 
   const handleEditInitiate = (txn, customer) => {
     setEditingId(txn.id);
-    setOldAmount(txn.amount);
+    setOldAmount(txn.amount); // 🚀 Store old amount to subtract later
     setOriginalCustId(customer.id);
     setQuickName(customer.name);
+    
     if (txn.type === 'CREDIT' || txn.amount < 0) {
       setItems([{ name: '', priceExpr: '' }]); 
       setPaid(Math.abs(txn.amount).toString()); 
@@ -195,10 +192,12 @@ const Khata = () => {
   const handleQuickSave = async (e) => {
     if (e) e.preventDefault();
     if (isSaving) return;
+    
     const totalAmt = items.reduce((sum, i) => sum + evaluateMath(i.priceExpr), 0);
     const paidAmt = Number(paid || 0);
     const balanceEffect = totalAmt - paidAmt;
     const cleanName = quickName.toLowerCase().trim();
+    
     if (!cleanName || (totalAmt <= 0 && paidAmt === 0)) return showToast("Enter Details!", "error");
 
     setIsSaving(true);
@@ -208,27 +207,52 @@ const Khata = () => {
         const { data } = await supabase.from('customers').insert([{ name: cleanName, balance: 0 }]).select().single();
         customer = data;
       }
-      const newBalance = (customer.balance || 0) + balanceEffect;
-      const updatedList = customers.map(c => c.id === customer.id ? {...c, balance: newBalance} : c).sort((a, b) => a.name.localeCompare(b.name));
-      setCustomers(updatedList);
-      updateMasterCache(updatedList);
+      
+      // 🚀 THE FIX: Calculate correctly for Edits vs New Entries
+      let newBalance;
       if (editingId) {
-        const { data: oldC } = await supabase.from('customers').select('balance').eq('id', originalCustId).single();
-        await supabase.from('customers').update({ balance: (oldC.balance || 0) - oldAmount }).eq('id', originalCustId);
+        // Subtract OLD amount from ORIGINAL customer, then add NEW amount to NEW customer
+        // (This handles moving a transaction between customers too)
+        const { data: origC } = await supabase.from('customers').select('balance').eq('id', originalCustId).single();
+        const adjustedOldBalance = (origC.balance || 0) - oldAmount;
+        await supabase.from('customers').update({ balance: adjustedOldBalance }).eq('id', originalCustId);
+        
+        // Refresh local current customer reference if it's the same person
+        const finalTargetBalance = (originalCustId === customer.id ? adjustedOldBalance : customer.balance) + balanceEffect;
+        newBalance = finalTargetBalance;
+      } else {
+        newBalance = (customer.balance || 0) + balanceEffect;
       }
+
       await supabase.from('customers').update({ balance: newBalance }).eq('id', customer.id);
+
       const itemsList = items.filter(i => i.name || i.priceExpr).map(i => `${i.name || 'Item'}: ₹${evaluateMath(i.priceExpr)}`).join(', ');
       const finalNote = itemsList 
         ? (paidAmt > 0 ? `${itemsList} | ✅ Paid: ₹${paidAmt} | 🚩 Left: ₹${balanceEffect}` : itemsList)
         : (paidAmt > 0 ? `Settlement: ₹${paidAmt}` : "Correction");
+
       if (editingId) {
-        await supabase.from('transactions').update({ customer_id: customer.id, amount: balanceEffect, description: finalNote, type: balanceEffect < 0 ? 'CREDIT' : 'DEBIT' }).eq('id', editingId);
+        await supabase.from('transactions').update({ 
+          customer_id: customer.id, 
+          amount: balanceEffect, 
+          description: finalNote,
+          type: balanceEffect < 0 ? 'CREDIT' : 'DEBIT' 
+        }).eq('id', editingId);
       } else {
-        await supabase.from('transactions').insert([{ customer_id: customer.id, type: balanceEffect < 0 ? 'CREDIT' : 'DEBIT', amount: balanceEffect, description: finalNote }]);
+        await supabase.from('transactions').insert([{ 
+          customer_id: customer.id, 
+          type: balanceEffect < 0 ? 'CREDIT' : 'DEBIT', 
+          amount: balanceEffect, 
+          description: finalNote 
+        }]);
       }
+
       setQuickName(''); setItems([{ name: '', priceExpr: '' }]); setPaid(''); setEditingId(null);
       setIsEntryOpen(false); fetchCustomers(); showToast("Success! ✅");
-    } catch (err) { showToast(err.message, "error"); fetchCustomers(); }
+    } catch (err) { 
+        showToast(err.message, "error");
+        fetchCustomers(); 
+    }
     setIsSaving(false);
   };
 
@@ -317,11 +341,9 @@ const Khata = () => {
           <div key={c.id} style={customerRow} className="customer-row" onClick={() => openHistory(c)}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
               <div style={avatarCircle}>{c.name[0].toUpperCase()}</div>
-              {/* 🚀 FIXED: LARGER FONT SIZE FOR NAME */}
               <strong style={{ fontSize: '1.10rem', textTransform: 'capitalize', color: '#eee', fontWeight: '700' }}>{c.name}</strong>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-              {/* 🚀 FIXED: LARGER FONT SIZE FOR BALANCE */}
               <span style={{ color: c.balance > 0 ? '#ff4d4d' : '#4caf50', fontWeight: '950', fontSize: '1.15rem' }}>₹{c.balance}</span>
               <div style={{ display: 'flex', gap: '12px', borderLeft: '1px solid #333', paddingLeft: '12px' }}>
                 <Edit3 size={17} color="#444" onClick={(e) => { e.stopPropagation(); openRename(c); }} style={{ cursor: 'pointer' }} />
